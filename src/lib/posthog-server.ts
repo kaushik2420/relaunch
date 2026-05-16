@@ -18,6 +18,10 @@ interface PostHogLike {
     event: string;
     properties?: Record<string, unknown>;
   }) => void;
+  identify: (input: {
+    distinctId: string;
+    properties?: Record<string, unknown>;
+  }) => void;
   shutdown: () => Promise<void>;
 }
 
@@ -35,6 +39,7 @@ export function getPostHogClient(): PostHogLike {
     // need to special-case the "analytics is off" path everywhere.
     _client = {
       capture: () => {},
+      identify: () => {},
       shutdown: async () => {},
     };
     return _client;
