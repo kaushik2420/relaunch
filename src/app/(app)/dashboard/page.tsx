@@ -4,6 +4,7 @@ import { createSupabaseServer } from '@/lib/supabase/server';
 import { EmpathyBanner } from '@/components/EmpathyBanner';
 import { RunNowButton } from '@/components/RunNowButton';
 import { MissionChecklist } from '@/components/MissionChecklist';
+import { getTodayQuote } from '@/lib/quotes';
 import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 import { sheets } from '@/lib/providers/sheets';
 import { decrypt } from '@/lib/crypto';
@@ -73,12 +74,8 @@ export default async function DashboardPage() {
         <Stat num={String(stats.interviews)} label="Interviews" sub={stats.interviews > 0 ? '🎉 keep going' : 'They\'re ahead'} />
       </div>
 
-      <div className="rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 p-5 text-white mb-6">
-        <p className="text-sm leading-relaxed">
-          "Every senior person I know has been laid off at least once. The ones who landed best treated each day like a clear, small mission. You're already doing that."
-        </p>
-        <p className="text-xs opacity-80 mt-2">— Today's note for you</p>
-      </div>
+      <DailyQuote />
+
 
       <div className="grid gap-6 md:grid-cols-[280px_1fr]">
         <aside className="space-y-4">
@@ -161,6 +158,20 @@ export default async function DashboardPage() {
 // ---------------------------------------------------------------
 // UI helpers
 // ---------------------------------------------------------------
+
+/** Daily-rotating quote — real attributed sources, no fake testimonials. */
+function DailyQuote() {
+  const q = getTodayQuote();
+  return (
+    <div className="rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 p-5 text-white mb-6">
+      <p className="text-sm leading-relaxed">"{q.text}"</p>
+      <p className="text-xs opacity-80 mt-2">
+        — {q.attribution}
+        {q.source && <span className="opacity-80"> · {q.source}</span>}
+      </p>
+    </div>
+  );
+}
 
 function JobCard({ m }: { m: SheetMatchRow }) {
   const matchTone =

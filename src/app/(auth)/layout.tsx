@@ -1,7 +1,12 @@
 import { Logo } from '@/components/Logo';
 import Link from 'next/link';
+import { pickQuotes, type Quote } from '@/lib/quotes';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
+  // Two real, attributed quotes — picked deterministically per day so the
+  // pair rotates daily. No fake user testimonials (see docs/EMPATHY.md).
+  const quotes = pickQuotes(2);
+
   return (
     <main className="min-h-screen grid md:grid-cols-2">
       <aside className="hidden md:flex flex-col justify-center p-14 bg-gradient-to-br from-brand-50 to-accent-50 relative overflow-hidden">
@@ -16,12 +21,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           No spam, no hustle-bro. Just one good lead a day — with everything you need to act on it.
         </p>
         <div className="mt-9 space-y-3 max-w-md">
-          <Quote name="Anya, ex-Twitter PM">
-            "It found me 3 referrers I'd never have spotted. Two replied. One led to my offer."
-          </Quote>
-          <Quote name="Sameer, ex-Stripe engineer">
-            "The tailored resume saved me hours every day. I just had to show up."
-          </Quote>
+          {quotes.map((q, i) => (
+            <QuoteCard key={i} q={q} />
+          ))}
         </div>
       </aside>
 
@@ -32,11 +34,14 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   );
 }
 
-function Quote({ name, children }: { name: string; children: React.ReactNode }) {
+function QuoteCard({ q }: { q: Quote }) {
   return (
     <div className="rounded-lg bg-white/70 backdrop-blur p-4 text-sm">
-      <p>"{children}"</p>
-      <p className="mt-1 text-xs font-semibold text-brand-700">— {name}</p>
+      <p className="leading-relaxed">"{q.text}"</p>
+      <p className="mt-1.5 text-xs font-semibold text-brand-700">
+        — {q.attribution}
+        {q.source && <span className="font-normal text-ink-soft"> · {q.source}</span>}
+      </p>
     </div>
   );
 }
