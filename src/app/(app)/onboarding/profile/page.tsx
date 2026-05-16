@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { saveProfileAction } from '../actions';
-import { Stepper } from '../upload/page';
+import { Stepper } from '@/components/Stepper';
 import type { UserProfile } from '@/lib/types';
 
 export default async function ProfilePage() {

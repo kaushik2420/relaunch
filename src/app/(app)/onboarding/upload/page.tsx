@@ -1,4 +1,5 @@
 import { EmpathyBanner } from '@/components/EmpathyBanner';
+import { Stepper } from '@/components/Stepper';
 import { ResumeUploader } from './ResumeUploader';
 
 export default function UploadPage() {
@@ -26,17 +27,3 @@ export default function UploadPage() {
   );
 }
 
-export function Stepper({ step }: { step: 1 | 2 | 3 | 4 }) {
-  return (
-    <div className="mb-7 flex justify-center gap-2">
-      {[1, 2, 3, 4].map((n) => (
-        <span
-          key={n}
-          className={`h-1 w-8 rounded-full ${
-            n < step ? 'bg-success' : n === step ? 'bg-brand-500' : 'bg-line'
-          }`}
-        />
-      ))}
-    </div>
-  );
-}

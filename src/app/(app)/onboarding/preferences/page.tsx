@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { savePreferencesAction } from '../actions';
-import { Stepper } from '../upload/page';
+import { Stepper } from '@/components/Stepper';
 
 export default async function PreferencesPage() {
   const sb = createSupabaseServer();
