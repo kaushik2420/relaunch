@@ -15,7 +15,10 @@ export class GreenhouseProvider implements JobProvider {
 
   async search(q: JobSearchQuery): Promise<JobPosting[]> {
     const boards = serverConfig().GREENHOUSE_BOARDS.split(',').map((s) => s.trim()).filter(Boolean);
-    if (!boards.length) return [];
+    if (!boards.length) {
+      console.warn('[greenhouse] GREENHOUSE_BOARDS env var is empty — set it to e.g. "razorpay,stripe,airbnb,vercel"');
+      return [];
+    }
 
     const allJobs: JobPosting[] = [];
     await Promise.all(
@@ -36,7 +39,9 @@ export class GreenhouseProvider implements JobProvider {
         }
       })
     );
-    return allJobs.slice(0, q.limit ?? 50);
+    const sliced = allJobs.slice(0, q.limit ?? 50);
+    console.log(`[greenhouse] ${boards.length} boards scanned → ${sliced.length} jobs after filter`);
+    return sliced;
   }
 }
 

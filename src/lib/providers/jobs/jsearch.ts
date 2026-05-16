@@ -21,7 +21,10 @@ export class JSearchProvider implements JobProvider {
 
   async search(q: JobSearchQuery): Promise<JobPosting[]> {
     const apiKey = process.env.JSEARCH_API_KEY;
-    if (!apiKey) return []; // Not configured — silently no-op
+    if (!apiKey) {
+      console.warn('[jsearch] JSEARCH_API_KEY not set — skipping');
+      return [];
+    }
 
     const location = q.locations[0] ?? '';
     const query = location ? `${q.query} in ${location}` : q.query;
@@ -46,10 +49,15 @@ export class JSearchProvider implements JobProvider {
       // JSearch's CDN sets long cache TTLs — let Vercel cache for 30 min
       next: { revalidate: 1800 },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[jsearch] HTTP ${res.status} — ${await res.text().catch(() => '')}`);
+      return [];
+    }
 
     const json: { data?: JSearchJob[] } = await res.json();
-    return (json.data ?? []).map(mapJSearch).filter((j): j is JobPosting => j !== null);
+    const mapped = (json.data ?? []).map(mapJSearch).filter((j): j is JobPosting => j !== null);
+    console.log(`[jsearch] ${location || '*'} → ${mapped.length} jobs`);
+    return mapped;
   }
 
   private mapDate(days: number): string {

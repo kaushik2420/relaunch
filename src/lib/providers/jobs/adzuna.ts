@@ -25,14 +25,23 @@ export class AdzunaProvider implements JobProvider {
   async search(q: JobSearchQuery): Promise<JobPosting[]> {
     const cfg = serverConfig();
     if (!cfg.ADZUNA_APP_ID || !cfg.ADZUNA_APP_KEY) {
-      throw new Error('ADZUNA_APP_ID/ADZUNA_APP_KEY not set');
+      console.warn('[adzuna] ADZUNA_APP_ID/ADZUNA_APP_KEY not set — skipping');
+      return [];
     }
 
-    const country = this.countryFor(q.locations[0] ?? 'India');
-    const results: JobPosting[] = [];
-
-    // Adzuna doesn't OR multiple locations natively — we fan out.
+    // Pick the CANONICAL location per country so we don't fire 10+ calls
+    // when the user has multiple spelling aliases (Bengaluru / Bangalore / BLR).
+    // Group by country, take one representative city each, max 3 countries.
+    const groups = new Map<string, string>();
     for (const loc of q.locations.length ? q.locations : ['']) {
+      const country = this.countryFor(loc);
+      if (!groups.has(country)) groups.set(country, loc);
+      if (groups.size >= 3) break;
+    }
+    if (groups.size === 0) groups.set('in', '');
+
+    const results: JobPosting[] = [];
+    for (const [country, loc] of groups) {
       const params = new URLSearchParams({
         app_id: cfg.ADZUNA_APP_ID,
         app_key: cfg.ADZUNA_APP_KEY,
@@ -43,11 +52,18 @@ export class AdzunaProvider implements JobProvider {
         content_type: 'application/json',
       });
       const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?${params}`;
-      const res = await fetch(url);
-      if (!res.ok) continue; // soft fail per-location
-      const data: { results: AdzunaResult[] } = await res.json();
-      for (const r of data.results ?? []) {
-        results.push(mapAdzuna(r));
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          console.warn(`[adzuna] ${country}/${loc} → HTTP ${res.status}`);
+          continue;
+        }
+        const data: { results: AdzunaResult[] } = await res.json();
+        const mapped = (data.results ?? []).map(mapAdzuna);
+        console.log(`[adzuna] ${country}/${loc || '*'} → ${mapped.length} jobs`);
+        results.push(...mapped);
+      } catch (err) {
+        console.warn(`[adzuna] ${country}/${loc} → ${(err as Error).message}`);
       }
     }
     return results;

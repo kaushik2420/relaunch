@@ -27,12 +27,27 @@ function providers(): JobProvider[] {
  * Errors in one provider don't sink the others.
  */
 export async function fetchJobsFromAll(q: JobSearchQuery): Promise<JobPosting[]> {
-  const settled = await Promise.allSettled(providers().map((p) => p.search(q)));
+  const ps = providers();
+  const settled = await Promise.allSettled(ps.map((p) => p.search(q)));
   const all: JobPosting[] = [];
-  for (const s of settled) {
-    if (s.status === 'fulfilled') all.push(...s.value);
-  }
-  return dedupe(all);
+
+  // Per-provider summary line — easy to scan in Vercel logs to spot
+  // which sources are returning 0.
+  const summary: Record<string, number | string> = {};
+  settled.forEach((s, i) => {
+    const name = ps[i]!.name;
+    if (s.status === 'fulfilled') {
+      summary[name] = s.value.length;
+      all.push(...s.value);
+    } else {
+      summary[name] = `ERROR: ${(s.reason as Error).message}`;
+    }
+  });
+  console.log('[jobs] per-provider counts:', summary);
+
+  const deduped = dedupe(all);
+  console.log(`[jobs] total ${all.length} → ${deduped.length} after dedup`);
+  return deduped;
 }
 
 function dedupe(jobs: JobPosting[]): JobPosting[] {

@@ -26,9 +26,14 @@ export class JoobleProvider implements JobProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[jooble] HTTP ${res.status}`);
+      return [];
+    }
     const data: { jobs?: JoobleResult[] } = await res.json();
-    return (data.jobs ?? []).map(mapJooble);
+    const mapped = (data.jobs ?? []).map(mapJooble);
+    console.log(`[jooble] ${body.location || '*'} → ${mapped.length} jobs`);
+    return mapped;
   }
 }
 
