@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { EmpathyBanner } from '@/components/EmpathyBanner';
 import { RunNowButton } from '@/components/RunNowButton';
+import { MissionChecklist } from '@/components/MissionChecklist';
 import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 import { sheets } from '@/lib/providers/sheets';
 import { decrypt } from '@/lib/crypto';
@@ -81,15 +82,12 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 md:grid-cols-[280px_1fr]">
         <aside className="space-y-4">
-          <div className="card p-5">
-            <h3 className="text-xs uppercase tracking-wider text-ink-soft mb-2">Today's mission</h3>
-            <ul className="text-sm space-y-2">
-              <li>{matches.length > 0 ? '✅' : '⬜'} Review today's matches</li>
-              <li>{stats.applicationsSent > 0 ? '✅' : '⬜'} Apply to top 2 picks</li>
-              <li>⬜ Send 1 InMail</li>
-              <li className="text-ink-soft">⬜ 20 min on a skill (optional)</li>
-            </ul>
-          </div>
+          <MissionChecklist
+            userId={user.id}
+            matchesCount={matches.length}
+            applicationsSent={stats.applicationsSent}
+          />
+
 
           <div className="card p-5">
             <h3 className="text-xs uppercase tracking-wider text-ink-soft mb-2">Run on demand</h3>
