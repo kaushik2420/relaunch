@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { serverConfig } from '@/lib/config';
 import { createSupabaseServer } from '@/lib/supabase/server';
+import { signOAuthState } from '@/lib/oauth-state';
 
 /**
  * Start Google OAuth — scope-minimal:
@@ -27,7 +28,9 @@ export async function GET(_req: NextRequest) {
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
-    state: user.id,
+    // Signed HMAC state — lets the callback identify the user without
+    // depending on a Supabase session surviving the Google round-trip.
+    state: signOAuthState(user.id),
   });
   return NextResponse.redirect(url);
 }
