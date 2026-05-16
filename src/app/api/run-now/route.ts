@@ -25,7 +25,10 @@ export async function POST(_req: NextRequest) {
 
   const admin = supabaseAdmin();
 
-  // Soft rate limit — 5 manual runs/hour, friendly error
+  // Soft rate limit — env-configurable. Default 20/hr is generous enough
+  // for active testing but still caps runaway loops. Set RUN_NOW_HOURLY_LIMIT
+  // in Vercel env if you want to tune it without a code change.
+  const hourlyLimit = Number(process.env.RUN_NOW_HOURLY_LIMIT ?? 20);
   const oneHourAgo = new Date(Date.now() - 60 * 60_000).toISOString();
   const { count } = await admin
     .from("job_runs")
@@ -33,9 +36,9 @@ export async function POST(_req: NextRequest) {
     .eq("user_id", user.id)
     .gte("run_at", oneHourAgo);
 
-  if (typeof count === "number" && count >= 5) {
+  if (typeof count === "number" && count >= hourlyLimit) {
     return NextResponse.json(
-      { error: "You've already run a match in the last hour. Try again in a bit." },
+      { error: `You've hit ${hourlyLimit} runs this hour. Take 5, then try again.` },
       { status: 429 },
     );
   }
