@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { EmpathyBanner } from '@/components/EmpathyBanner';
+import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 
 export default async function DashboardPage() {
   const sb = createSupabaseServer();
@@ -10,9 +11,20 @@ export default async function DashboardPage() {
 
   const { data: row } = await sb
     .from('users')
-    .select('first_name, signup_position, cohort, last_run_at, user_sheet_id')
+    .select('first_name, signup_position, cohort, last_run_at, user_sheet_id, profile, locations')
     .eq('id', user.id)
     .single();
+
+  // Bounce mid-onboarding users back to the step they haven't finished.
+  // This is the same function signInAction uses — keeps routing consistent.
+  if (row) {
+    const next = nextOnboardingStep({
+      profile: row.profile,
+      locations: row.locations,
+      user_sheet_id: row.user_sheet_id,
+    });
+    if (next !== '/dashboard') redirect(next);
+  }
 
   const greeting = greetingFor(new Date());
 

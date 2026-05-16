@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { evaluateCohortCapacity } from "@/lib/services/billing";
 import { publicConfig } from "@/lib/config";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { nextOnboardingStep } from "@/lib/services/onboarding-route";
 
 /**
  * All auth server actions live in one file so the (auth)/* pages stay
@@ -32,7 +33,16 @@ export async function signInAction(formData: FormData) {
   });
   posthog.identify({ distinctId: signInData.user!.id, properties: { email } });
   await posthog.shutdown();
-  redirect("/dashboard");
+
+  // Smart routing: take the user to the step they haven't completed yet,
+  // not just /dashboard. So if they signed up but never uploaded a resume,
+  // logging back in drops them on /onboarding/upload.
+  const { data: row } = await sb
+    .from("users")
+    .select("profile, locations, user_sheet_id")
+    .eq("id", signInData.user!.id)
+    .single();
+  redirect(nextOnboardingStep(row ?? { profile: null, locations: null, user_sheet_id: null }));
 }
 
 export async function signUpAction(formData: FormData) {
