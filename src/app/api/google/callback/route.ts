@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { google } from "googleapis";
+import { google, type Auth } from "googleapis";
 import { serverConfig } from "@/lib/config";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { encrypt } from "@/lib/crypto";
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     cfg.GOOGLE_OAUTH_REDIRECT,
   );
 
-  let tokens: { refresh_token?: string | null } & Record<string, unknown>;
+  let tokens: Auth.Credentials;
   try {
     const result = await oauth2.getToken(code);
     tokens = result.tokens;
@@ -59,7 +59,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!tokens.refresh_token) {
+  const refreshToken = tokens.refresh_token;
+  if (!refreshToken) {
     return NextResponse.redirect(
       new URL("/onboarding/connect?error=no_refresh_token", req.url),
     );
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
 
   let sheetId: string;
   try {
-    sheetId = await sheets().createUserSheet(firstName, tokens.refresh_token);
+    sheetId = await sheets().createUserSheet(firstName, refreshToken);
   } catch {
     return NextResponse.redirect(
       new URL("/onboarding/connect?error=sheet_create", req.url),
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
   await admin
     .from("users")
     .update({
-      google_refresh_token_enc: encrypt(tokens.refresh_token),
+      google_refresh_token_enc: encrypt(refreshToken),
       google_email: userinfo.data.email ?? null,
       user_sheet_id: sheetId,
     })
