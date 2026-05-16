@@ -1,6 +1,6 @@
 import { google, sheets_v4 } from 'googleapis';
 import { serverConfig } from '@/lib/config';
-import type { SheetsProvider } from './types';
+import type { SheetsProvider, SheetMatchRow } from './types';
 import type { TailoredJobMatch } from '@/lib/types';
 
 const HEADERS = [
@@ -144,5 +144,43 @@ export class GoogleSheetsProvider implements SheetsProvider {
       if (typeof k === 'string' && typeof v === 'string') out[k] = v;
     }
     return out;
+  }
+
+  // ----------------------------------------------------------------
+  async readMatches(spreadsheetId: string, refreshToken: string, limit = 50): Promise<SheetMatchRow[]> {
+    const sheets = this.sheetsClient(refreshToken);
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      // Skip the header row (A1). Columns A:N match the HEADERS array.
+      range: 'Daily Matches!A2:N',
+    });
+    const rows = res.data.values ?? [];
+
+    // Newest first — the cron appends so the newest is at the bottom.
+    const ordered = [...rows].reverse().slice(0, limit);
+
+    return ordered
+      .map((r): SheetMatchRow | null => {
+        if (!r || r.length === 0) return null;
+        const pctStr = (r[3] ?? '').toString().replace('%', '').trim();
+        const pct = Number(pctStr);
+        return {
+          date: (r[0] ?? '').toString(),
+          company: (r[1] ?? '').toString(),
+          role: (r[2] ?? '').toString(),
+          matchPercent: Number.isFinite(pct) ? pct : 0,
+          location: (r[4] ?? '').toString(),
+          mode: (r[5] ?? '').toString(),
+          expectedCtc: (r[6] ?? '').toString(),
+          jobUrl: (r[7] ?? '').toString(),
+          tailoredResumeUrl: (r[8] ?? '').toString(),
+          referrers: (r[9] ?? '').toString(),
+          inmailSubject: (r[10] ?? '').toString(),
+          applied: /^y/i.test((r[11] ?? '').toString()),
+          outcome: (r[12] ?? '').toString(),
+          notes: (r[13] ?? '').toString(),
+        };
+      })
+      .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
   }
 }
