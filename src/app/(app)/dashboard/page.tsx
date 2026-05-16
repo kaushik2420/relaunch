@@ -138,7 +138,15 @@ export default async function DashboardPage() {
           )}
 
           <div className="space-y-3">
-            {matches.slice(0, 12).map((m, i) => (
+            {[...matches]
+              // Sort by match % descending — highest match at top — and tie-break
+              // by most-recent date so today's strong matches beat older equal scores.
+              .sort((a, b) => {
+                if (b.matchPercent !== a.matchPercent) return b.matchPercent - a.matchPercent;
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+              })
+              .slice(0, 12)
+              .map((m, i) => (
               <JobCard key={i} m={m} />
             ))}
           </div>
