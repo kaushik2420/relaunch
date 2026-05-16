@@ -39,6 +39,7 @@ const serverSchema = z.object({
   ADZUNA_APP_KEY: z.string().optional(),
   JOOBLE_API_KEY: z.string().optional(),
   GREENHOUSE_BOARDS: z.string().default(''),
+  JSEARCH_API_KEY: z.string().optional(),
 
   // Google
   GOOGLE_CLIENT_ID: z.string().optional(),

@@ -5,6 +5,7 @@ import { rankJobs } from './job-matcher';
 import { llm } from '@/lib/providers/llm';
 import { sheets } from '@/lib/providers/sheets';
 import { email as emailProvider } from '@/lib/providers/email';
+import { findReferrers } from './referrer-finder';
 import type { TailoredJobMatch, UserProfile, UserPreferences } from '@/lib/types';
 
 /**
@@ -40,23 +41,66 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   const top = ranked.slice(0, 5);
   if (!top.length) return { matchesFound: 0, emailed: 0 };
 
-  // 3. Tailor each top match (parallel, capped to avoid LLM rate limits)
+  // We may need the Google refresh token both for writing the Sheet AND
+  // for creating tailored-resume Docs. Decode once, share between steps.
+  const refreshToken =
+    userRow.user_sheet_id && userRow.google_refresh_token_enc
+      ? decrypt(userRow.google_refresh_token_enc)
+      : null;
+
+  // 3. For each top match, in parallel:
+  //    (a) tailor the resume content via Claude
+  //    (b) create a Google Doc with that content in user's Drive
+  //    (c) look up 1-2 potential referrers (Proxycurl; no-op if no key)
+  //    (d) draft an InMail addressed to the referrer (or generic if none)
+  // Each step is wrapped in try/catch — a single failure shouldn't kill
+  // the whole match. Better to ship a partial row than nothing.
   const matches: TailoredJobMatch[] = await Promise.all(
     top.map(async ({ job, matchPercent, reasons }) => {
       const tailored = await llm().tailorResume({ profile, job });
-      // Referrers + InMail are best-effort — skip silently if no Proxycurl key
+
+      // (b) Save tailored resume as Google Doc
+      let tailoredResumeUrl: string | undefined;
+      if (refreshToken) {
+        try {
+          tailoredResumeUrl = await sheets().createTailoredResumeDoc({
+            refreshToken,
+            company: job.company,
+            role: job.title,
+            candidateName: profile.fullName,
+            tailored,
+          });
+        } catch (err) {
+          console.error('createTailoredResumeDoc failed', err);
+        }
+      }
+
+      // (c) Find referrers (no-op when PROXYCURL_API_KEY isn't set)
       let referrers: TailoredJobMatch['referrers'] = [];
-      let inmail: TailoredJobMatch['inmailDraft'] | undefined;
       try {
-        // referrer lookup deferred — implement /lib/services/referrer-finder.ts
-      } catch { /* swallow */ }
-      return { job, matchPercent, reasons, tailored, referrers, inmailDraft: inmail };
+        referrers = await findReferrers({ profile, job, limit: 2 });
+      } catch (err) {
+        console.error('findReferrers failed', err);
+      }
+
+      // (d) InMail — always draft, even without a referrer
+      let inmailDraft: TailoredJobMatch['inmailDraft'] | undefined;
+      try {
+        inmailDraft = await llm().draftInmail({
+          profile,
+          job,
+          referrer: referrers[0], // undefined if list empty → generic version
+        });
+      } catch (err) {
+        console.error('draftInmail failed', err);
+      }
+
+      return { job, matchPercent, reasons, tailored, tailoredResumeUrl, referrers, inmailDraft };
     })
   );
 
   // 4. Append to user's Sheet (if connected)
-  if (userRow.user_sheet_id && userRow.google_refresh_token_enc) {
-    const refreshToken = decrypt(userRow.google_refresh_token_enc);
+  if (userRow.user_sheet_id && refreshToken) {
     await sheets().appendMatches(userRow.user_sheet_id, refreshToken, matches);
   }
 

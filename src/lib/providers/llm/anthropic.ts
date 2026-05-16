@@ -123,18 +123,28 @@ Rules:
   }: {
     profile: UserProfile;
     job: JobPosting;
-    referrer: { name: string; role: string; sharedContext?: string };
+    referrer?: { name: string; role: string; sharedContext?: string };
   }): Promise<{ subject: string; body: string }> {
-    const prompt = `Write a short, warm LinkedIn InMail from ${profile.fullName} to ${referrer.name} (${referrer.role}).
+    const recipientLine = referrer
+      ? `Write a short, warm LinkedIn InMail from ${profile.fullName} to ${referrer.name} (${referrer.role}).`
+      : `Write a short, warm cold outreach message from ${profile.fullName} to a generic hiring contact at ${job.company} (we don't know a specific name).`;
+
+    const contextLine = referrer?.sharedContext
+      ? `Shared context with the recipient: ${referrer.sharedContext}`
+      : !referrer
+      ? `Since we don't have a specific name, address it to "Hi there" (no "Hi Hiring Team" — too corporate).`
+      : '';
+
+    const prompt = `${recipientLine}
 
 Context: ${profile.fullName} is exploring after a layoff. The user is applying to ${job.title} at ${job.company}.
-${referrer.sharedContext ? `Shared context with the recipient: ${referrer.sharedContext}` : ''}
+${contextLine}
 
 Rules:
 - Max 130 words.
 - Warm, specific, never desperate.
-- Open with the shared context if present, otherwise with a clear, honest reason for reaching out.
-- Ask for 15 minutes of their perspective — NOT a referral.
+- ${referrer ? 'Open with the shared context if present, otherwise with a clear, honest reason for reaching out.' : 'Open with a clear, honest reason for reaching out about this specific role.'}
+- Ask for 15 minutes of their perspective — NOT a referral${referrer ? '' : ' or a job'}.
 - Close with one line that respects their time.
 
 Output STRICT JSON: { "subject": string, "body": string }`;

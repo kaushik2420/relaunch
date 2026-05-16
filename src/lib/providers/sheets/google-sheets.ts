@@ -1,7 +1,8 @@
 import { google, sheets_v4 } from 'googleapis';
 import { serverConfig } from '@/lib/config';
 import type { SheetsProvider, SheetMatchRow } from './types';
-import type { TailoredJobMatch } from '@/lib/types';
+import type { TailoredJobMatch, TailoredResume } from '@/lib/types';
+import { Readable } from 'node:stream';
 
 const HEADERS = [
   'Date',
@@ -183,4 +184,75 @@ export class GoogleSheetsProvider implements SheetsProvider {
       })
       .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
   }
+
+  // ----------------------------------------------------------------
+  async createTailoredResumeDoc(input: {
+    refreshToken: string;
+    company: string;
+    role: string;
+    candidateName: string;
+    tailored: TailoredResume;
+  }): Promise<string> {
+    const drive = google.drive({ version: 'v3', auth: this.auth(input.refreshToken) });
+    const body = renderResumeText(input);
+
+    // Upload as text/plain with target MIME = Google Doc — Drive converts on the fly.
+    const created = await drive.files.create({
+      requestBody: {
+        name: `Tailored Resume — ${input.company} · ${input.role}`,
+        mimeType: 'application/vnd.google-apps.document',
+      },
+      media: {
+        mimeType: 'text/plain',
+        body: Readable.from([body]),
+      },
+      fields: 'id',
+    });
+
+    const id = created.data.id;
+    if (!id) throw new Error('Google Drive did not return a doc id');
+    return `https://docs.google.com/document/d/${id}/edit`;
+  }
+}
+
+/**
+ * Render the tailored resume as plain text — Google Docs auto-formats
+ * the upper-case lines and double newlines into headings and paragraphs.
+ * We deliberately keep this readable as plain text too, so the user can
+ * also copy-paste it into Word or LinkedIn.
+ */
+function renderResumeText(input: {
+  company: string;
+  role: string;
+  candidateName: string;
+  tailored: TailoredResume;
+}): string {
+  const lines: string[] = [];
+  lines.push(input.candidateName.toUpperCase());
+  lines.push(`Tailored for ${input.role} at ${input.company}`);
+  lines.push('');
+  lines.push('SUMMARY');
+  lines.push(input.tailored.summary);
+  lines.push('');
+  lines.push('CORE SKILLS');
+  lines.push(input.tailored.highlightedSkills.join(' · '));
+  lines.push('');
+  lines.push('EXPERIENCE');
+  for (const e of input.tailored.experienceBullets) {
+    lines.push('');
+    lines.push(`${e.title} — ${e.company}`);
+    for (const b of e.bullets) {
+      lines.push(`• ${b}`);
+    }
+  }
+  if (input.tailored.removedSections.length) {
+    lines.push('');
+    lines.push('---');
+    lines.push(`Sections removed for this version: ${input.tailored.removedSections.join(', ')}`);
+  }
+  if (input.tailored.rationale) {
+    lines.push('');
+    lines.push(`(Tailoring rationale: ${input.tailored.rationale})`);
+  }
+  return lines.join('\n');
 }

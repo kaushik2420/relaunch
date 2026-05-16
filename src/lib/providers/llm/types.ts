@@ -21,11 +21,13 @@ export interface LLMProvider {
     job: JobPosting;
   }): Promise<TailoredResume>;
 
-  /** Generates a personalized InMail. Tone must be warm, not salesy. */
+  /** Generates a personalized InMail. Tone must be warm, not salesy.
+   *  If no referrer is provided, generates a cold outreach to a generic
+   *  "Hiring Team" — useful when referrer lookup is unavailable. */
   draftInmail(input: {
     profile: UserProfile;
     job: JobPosting;
-    referrer: { name: string; role: string; sharedContext?: string };
+    referrer?: { name: string; role: string; sharedContext?: string };
   }): Promise<{ subject: string; body: string }>;
 
   /** Embeds text for similarity matching. Cheap, batched. */

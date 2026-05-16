@@ -4,11 +4,13 @@ import type { JobProvider, JobSearchQuery } from './types';
 import { AdzunaProvider } from './adzuna';
 import { JoobleProvider } from './jooble';
 import { GreenhouseProvider } from './greenhouse';
+import { JSearchProvider } from './jsearch';
 
 const REGISTRY: Record<string, () => JobProvider> = {
   adzuna: () => new AdzunaProvider(),
   jooble: () => new JoobleProvider(),
   greenhouse: () => new GreenhouseProvider(),
+  jsearch: () => new JSearchProvider(),
 };
 
 let _providers: JobProvider[] | undefined;
