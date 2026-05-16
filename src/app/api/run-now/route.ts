@@ -64,7 +64,7 @@ export async function POST(_req: NextRequest) {
 
   const runStart = Date.now();
   try {
-    const { matchesFound, emailed } = await runDailyForUser(row as UserRow);
+    const { matchesFound, emailed, providers } = await runDailyForUser(row as UserRow);
     await admin.from("job_runs").insert({
       user_id: user.id,
       jobs_found: matchesFound,
@@ -76,7 +76,7 @@ export async function POST(_req: NextRequest) {
       .from("users")
       .update({ last_run_at: new Date().toISOString() })
       .eq("id", user.id);
-    return NextResponse.json({ matchesFound, emailed });
+    return NextResponse.json({ matchesFound, emailed, providers });
   } catch (err) {
     await admin.from("job_runs").insert({
       user_id: user.id,

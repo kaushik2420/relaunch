@@ -26,23 +26,35 @@ function providers(): JobProvider[] {
  * Fan out to every enabled provider in parallel, dedupe by (company, title).
  * Errors in one provider don't sink the others.
  */
+/** Per-provider diagnostic info — used by /api/run-now to surface
+ *  why no jobs came back without digging through Vercel logs. */
+export interface ProviderResult {
+  name: string;
+  count: number;
+  error?: string;
+}
+
+/** Module-level: latest provider summary from the most recent fetch.
+ *  Read once after fetchJobsFromAll() to get the breakdown. */
+let _lastSummary: ProviderResult[] = [];
+export function lastFetchSummary(): ProviderResult[] {
+  return _lastSummary;
+}
+
 export async function fetchJobsFromAll(q: JobSearchQuery): Promise<JobPosting[]> {
   const ps = providers();
   const settled = await Promise.allSettled(ps.map((p) => p.search(q)));
   const all: JobPosting[] = [];
 
-  // Per-provider summary line — easy to scan in Vercel logs to spot
-  // which sources are returning 0.
-  const summary: Record<string, number | string> = {};
-  settled.forEach((s, i) => {
+  const summary: ProviderResult[] = settled.map((s, i) => {
     const name = ps[i]!.name;
     if (s.status === 'fulfilled') {
-      summary[name] = s.value.length;
       all.push(...s.value);
-    } else {
-      summary[name] = `ERROR: ${(s.reason as Error).message}`;
+      return { name, count: s.value.length };
     }
+    return { name, count: 0, error: (s.reason as Error).message };
   });
+  _lastSummary = summary;
   console.log('[jobs] per-provider counts:', summary);
 
   const deduped = dedupe(all);

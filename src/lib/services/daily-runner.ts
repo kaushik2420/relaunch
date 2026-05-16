@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decrypt } from '@/lib/crypto';
-import { fetchJobsFromAll } from '@/lib/providers/jobs';
+import { fetchJobsFromAll, lastFetchSummary, type ProviderResult } from '@/lib/providers/jobs';
 import { rankJobs } from './job-matcher';
 import { llm } from '@/lib/providers/llm';
 import { sheets } from '@/lib/providers/sheets';
@@ -12,7 +12,7 @@ import type { TailoredJobMatch, UserProfile, UserPreferences } from '@/lib/types
  * Process a single user's daily run.
  * Stateless — call this in a loop or fan out as parallel function invocations.
  */
-export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound: number; emailed: number }> {
+export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound: number; emailed: number; providers: ProviderResult[] }> {
   const profile = userRow.profile as UserProfile;
   const prefs: UserPreferences = {
     locations: userRow.locations ?? [],
@@ -39,7 +39,9 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // 2. Rank + filter; take the top N (configurable)
   const ranked = await rankJobs(jobs, profile, prefs);
   const top = ranked.slice(0, 5);
-  if (!top.length) return { matchesFound: 0, emailed: 0 };
+  if (!top.length) {
+    return { matchesFound: 0, emailed: 0, providers: lastFetchSummary() };
+  }
 
   // We may need the Google refresh token both for writing the Sheet AND
   // for creating tailored-resume Docs. Decode once, share between steps.
@@ -121,7 +123,7 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     html: renderDigestHtml(userRow.first_name ?? 'friend', matches),
   });
 
-  return { matchesFound: ranked.length, emailed: matches.length };
+  return { matchesFound: ranked.length, emailed: matches.length, providers: lastFetchSummary() };
 }
 
 function renderDigestHtml(name: string, matches: TailoredJobMatch[]): string {
