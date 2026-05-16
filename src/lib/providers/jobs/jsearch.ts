@@ -29,14 +29,19 @@ export class JSearchProvider implements JobProvider {
       query,
       page: '1',
       num_pages: '1',
+      country: countryFromLocation(location),
       date_posted: this.mapDate(q.postedWithinDays ?? 7),
     });
     if (q.workMode === 'remote') params.set('work_from_home', 'true');
 
-    const res = await fetch(`https://jsearch.p.rapidapi.com/search?${params}`, {
+    // NOTE: use /search-v2 (the endpoint OpenWebNinja documents on RapidAPI).
+    // /search is an older route some samples still reference — it works but
+    // v2 is the supported path.
+    const res = await fetch(`https://jsearch.p.rapidapi.com/search-v2?${params}`, {
       headers: {
-        'X-RapidAPI-Key': apiKey,
-        'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
+        'Content-Type': 'application/json',
+        'x-rapidapi-host': 'jsearch.p.rapidapi.com',
+        'x-rapidapi-key': apiKey,
       },
       // JSearch's CDN sets long cache TTLs — let Vercel cache for 30 min
       next: { revalidate: 1800 },
@@ -53,6 +58,24 @@ export class JSearchProvider implements JobProvider {
     if (days <= 7) return 'week';
     return 'month';
   }
+}
+
+/**
+ * Two-letter country code JSearch expects. Maps the user's location
+ * preference to a country. Defaults to 'us' (matches RapidAPI sample
+ * behaviour) when we can't tell. Add more as you onboard global users.
+ */
+function countryFromLocation(loc: string): string {
+  const lower = loc.toLowerCase();
+  if (/india|mumbai|delhi|bengaluru|bangalore|hyderabad|pune|chennai|kolkata|noida|gurgaon/.test(lower)) return 'in';
+  if (/united states|usa|new york|sf|san francisco|seattle|chicago|austin|boston|los angeles|nyc/.test(lower)) return 'us';
+  if (/london|uk|united kingdom|manchester|edinburgh/.test(lower)) return 'gb';
+  if (/singapore/.test(lower)) return 'sg';
+  if (/australia|sydney|melbourne/.test(lower)) return 'au';
+  if (/germany|berlin|munich/.test(lower)) return 'de';
+  if (/canada|toronto|vancouver|montreal/.test(lower)) return 'ca';
+  if (/dubai|uae|abu dhabi/.test(lower)) return 'ae';
+  return 'us';
 }
 
 interface JSearchJob {
