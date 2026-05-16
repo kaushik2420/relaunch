@@ -20,6 +20,8 @@ export interface SheetMatchRow {
   applied: boolean;
   outcome: string;
   notes: string;
+  /** User reaction stored in column O. Empty if no reaction. */
+  reaction: '' | 'liked' | 'hidden';
 }
 
 export interface SheetsProvider {
@@ -47,4 +49,17 @@ export interface SheetsProvider {
     candidateName: string;
     tailored: TailoredResume;
   }): Promise<string>;
+
+  /**
+   * Set the user's reaction (👍 liked / 👎 hidden) on a specific match.
+   * Identifies the row by company+role match (case-insensitive). No-op if
+   * the row isn't found. Writes to column O.
+   */
+  setReaction(input: {
+    spreadsheetId: string;
+    refreshToken: string;
+    company: string;
+    role: string;
+    reaction: '' | 'liked' | 'hidden';
+  }): Promise<void>;
 }

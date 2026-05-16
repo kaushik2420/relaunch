@@ -19,6 +19,7 @@ const HEADERS = [
   'Applied?',
   'Outcome',
   'Notes',
+  'Reaction', // column O — '👍 liked' / '👎 hidden' / ''
 ];
 
 export class GoogleSheetsProvider implements SheetsProvider {
@@ -107,7 +108,24 @@ export class GoogleSheetsProvider implements SheetsProvider {
   async appendMatches(spreadsheetId: string, refreshToken: string, matches: TailoredJobMatch[]): Promise<void> {
     if (!matches.length) return;
     const sheets = this.sheetsClient(refreshToken);
-    const rows = matches.map((m) => [
+
+    // Dedup: skip matches whose (company, role) already exists in the sheet.
+    // Cheaper to do this in one read than relying on the user to clean up.
+    const existing = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'Daily Matches!B2:C',
+    });
+    const seen = new Set<string>();
+    for (const row of existing.data.values ?? []) {
+      const [company, role] = row;
+      if (typeof company === 'string' && typeof role === 'string') {
+        seen.add(matchKey(company, role));
+      }
+    }
+    const fresh = matches.filter((m) => !seen.has(matchKey(m.job.company, m.job.title)));
+    if (!fresh.length) return;
+
+    const rows = fresh.map((m) => [
       new Date().toISOString().slice(0, 10),
       m.job.company,
       m.job.title,
@@ -126,6 +144,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
       'No',
       '',
       '',
+      '', // Reaction (column O) — starts blank
     ]);
     await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -156,8 +175,10 @@ export class GoogleSheetsProvider implements SheetsProvider {
     const sheets = this.sheetsClient(refreshToken);
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      // Skip the header row (A1). Columns A:N match the HEADERS array.
-      range: 'Daily Matches!A2:N',
+      // Skip the header row (A1). Columns A:O — N was the original
+      // range, O is the new Reaction column. Sheets created before
+      // this change won't have column O populated; we default to '' below.
+      range: 'Daily Matches!A2:O',
     });
     const rows = res.data.values ?? [];
 
@@ -184,6 +205,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
           applied: /^y/i.test((r[11] ?? '').toString()),
           outcome: (r[12] ?? '').toString(),
           notes: (r[13] ?? '').toString(),
+          reaction: parseReaction((r[14] ?? '').toString()),
         };
       })
       .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
@@ -217,6 +239,60 @@ export class GoogleSheetsProvider implements SheetsProvider {
     if (!id) throw new Error('Google Drive did not return a doc id');
     return `https://docs.google.com/document/d/${id}/edit`;
   }
+
+  // ----------------------------------------------------------------
+  async setReaction(input: {
+    spreadsheetId: string;
+    refreshToken: string;
+    company: string;
+    role: string;
+    reaction: '' | 'liked' | 'hidden';
+  }): Promise<void> {
+    const sheets = this.sheetsClient(input.refreshToken);
+
+    // Find the row by (company, role) match — read B:C, scan in JS.
+    // For a few hundred rows this is plenty fast, and means we don't have
+    // to add a hidden ID column.
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: input.spreadsheetId,
+      range: 'Daily Matches!B2:C',
+    });
+    const target = matchKey(input.company, input.role);
+    let rowIndex = -1;
+    (res.data.values ?? []).forEach((row, i) => {
+      const [c, r] = row;
+      if (typeof c === 'string' && typeof r === 'string' && matchKey(c, r) === target) {
+        rowIndex = i + 2; // +1 for 1-indexed, +1 to skip header
+      }
+    });
+    if (rowIndex < 0) return; // row not found — silently no-op
+
+    const value =
+      input.reaction === 'liked'
+        ? '👍 liked'
+        : input.reaction === 'hidden'
+        ? '👎 hidden'
+        : '';
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: input.spreadsheetId,
+      range: `Daily Matches!O${rowIndex}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[value]] },
+    });
+  }
+}
+
+// ---------------------------------------------------------------
+function matchKey(company: string, role: string): string {
+  return `${company.trim().toLowerCase()}|${role.trim().toLowerCase()}`;
+}
+
+function parseReaction(raw: string): '' | 'liked' | 'hidden' {
+  const lower = raw.toLowerCase();
+  if (lower.includes('like') || raw.includes('👍')) return 'liked';
+  if (lower.includes('hide') || lower.includes('hidden') || raw.includes('👎')) return 'hidden';
+  return '';
 }
 
 /**

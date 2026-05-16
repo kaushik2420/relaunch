@@ -4,6 +4,7 @@ import { createSupabaseServer } from '@/lib/supabase/server';
 import { EmpathyBanner } from '@/components/EmpathyBanner';
 import { RunNowButton } from '@/components/RunNowButton';
 import { MissionChecklist } from '@/components/MissionChecklist';
+import { ReactionButtons } from '@/components/ReactionButtons';
 import { getTodayQuote } from '@/lib/quotes';
 import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 import { sheets } from '@/lib/providers/sheets';
@@ -12,10 +13,15 @@ import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 export const dynamic = 'force-dynamic'; // never cache — Sheet content changes every day
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: { filter?: string };
+}) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
+  const showLikedOnly = searchParams.filter === 'liked';
 
   const { data: row } = await sb
     .from('users')
@@ -113,7 +119,29 @@ export default async function DashboardPage() {
         </aside>
 
         <section>
-          <h2 className="text-xl font-semibold mb-3">Today's matches for you</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 className="text-xl font-semibold">
+              {showLikedOnly ? 'Your liked roles' : "Today's matches for you"}
+            </h2>
+            <div className="flex items-center gap-1 text-xs">
+              <Link
+                href="/dashboard"
+                className={`px-3 py-1 rounded-full ${
+                  !showLikedOnly ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-ink-soft hover:text-ink'
+                }`}
+              >
+                All
+              </Link>
+              <Link
+                href="/dashboard?filter=liked"
+                className={`px-3 py-1 rounded-full ${
+                  showLikedOnly ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-ink-soft hover:text-ink'
+                }`}
+              >
+                👍 Liked
+              </Link>
+            </div>
+          </div>
 
           {sheetError && (
             <div className="card border-warn/30 bg-warn-soft mb-4">
@@ -134,17 +162,25 @@ export default async function DashboardPage() {
 
           <div className="space-y-3">
             {[...matches]
-              // Sort by match % descending — highest match at top — and tie-break
-              // by most-recent date so today's strong matches beat older equal scores.
+              // Filter: drop 👎 hidden always; if "Liked only", keep just 👍
+              .filter((m) =>
+                showLikedOnly ? m.reaction === 'liked' : m.reaction !== 'hidden',
+              )
+              // Sort by match % descending — highest at top — tie-break by date.
               .sort((a, b) => {
                 if (b.matchPercent !== a.matchPercent) return b.matchPercent - a.matchPercent;
                 return new Date(b.date).getTime() - new Date(a.date).getTime();
               })
               .slice(0, 12)
               .map((m, i) => (
-              <JobCard key={i} m={m} />
-            ))}
+                <JobCard key={`${m.company}::${m.role}::${i}`} m={m} />
+              ))}
           </div>
+          {showLikedOnly && matches.filter((m) => m.reaction === 'liked').length === 0 && (
+            <p className="mt-4 text-sm text-ink-soft">
+              No liked roles yet. Hit 👍 on a job card to save it here.
+            </p>
+          )}
         </section>
       </div>
 
@@ -215,7 +251,7 @@ function JobCard({ m }: { m: SheetMatchRow }) {
         </p>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {m.jobUrl && (
           <a href={m.jobUrl} target="_blank" rel="noreferrer" className="btn-primary text-xs px-3 py-1.5">
             View role ↗
@@ -232,6 +268,9 @@ function JobCard({ m }: { m: SheetMatchRow }) {
         {m.outcome && (
           <span className="chip">{m.outcome}</span>
         )}
+        <div className="ml-auto">
+          <ReactionButtons company={m.company} role={m.role} initial={m.reaction} />
+        </div>
       </div>
     </div>
   );
