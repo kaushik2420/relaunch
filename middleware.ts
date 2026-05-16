@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 /**
  * Middleware-light: refresh the Supabase session cookie on every request.
@@ -13,13 +13,13 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get: (n) => request.cookies.get(n)?.value,
-        set: (n, v, opts) => {
+        get: (n: string) => request.cookies.get(n)?.value,
+        set: (n: string, v: string, opts: CookieOptions) => {
           request.cookies.set({ name: n, value: v, ...opts });
           response = NextResponse.next({ request: { headers: request.headers } });
           response.cookies.set({ name: n, value: v, ...opts });
         },
-        remove: (n, opts) => {
+        remove: (n: string, opts: CookieOptions) => {
           request.cookies.set({ name: n, value: '', ...opts });
           response = NextResponse.next({ request: { headers: request.headers } });
           response.cookies.set({ name: n, value: '', ...opts });
