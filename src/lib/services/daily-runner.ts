@@ -26,8 +26,16 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     timezone: userRow.timezone ?? 'Asia/Kolkata',
   };
 
-  // 1. Pull jobs across all enabled providers
-  const query = (profile.headline ?? `${profile.experience?.[0]?.title ?? 'engineer'}`).slice(0, 60);
+  // 1. Pull jobs across all enabled providers.
+  //
+  // Query strategy: the job APIs (Adzuna, Jooble, JSearch) want SHORT
+  // keyword phrases like "Product Manager", not full headlines like
+  // "Senior Product Manager with 7 years in fintech driving 0->1 launches".
+  // We derive a clean role title from the most recent experience entry,
+  // strip seniority words (the API filters those separately if at all),
+  // and cap to ~40 chars. Falls back to a sensible default if needed.
+  const query = deriveJobQuery(profile);
+  console.log(`[daily-runner] query="${query}" locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
   const jobs = await fetchJobsFromAll({
     query,
     locations: prefs.locations.length ? prefs.locations : ['India'],
@@ -124,6 +132,42 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   });
 
   return { matchesFound: ranked.length, emailed: matches.length, providers: lastFetchSummary() };
+}
+
+/**
+ * Pick the cleanest short keyword phrase to send to job-search APIs.
+ *
+ * Priority:
+ *   1. Most recent job title — that's almost always what they want next
+ *   2. Strip seniority prefixes ("Senior", "Lead", "Principal") — APIs
+ *      filter on these inconsistently and they shrink the result pool
+ *   3. Strip trailing department/team noise ("Growth", "Platform") if
+ *      title is still long after step 2
+ *   4. Cap at 40 chars to stay friendly to all APIs
+ *
+ * Examples:
+ *   "Senior Product Manager, Growth"        → "Product Manager Growth"
+ *   "Staff Software Engineer at Flipkart"   → "Software Engineer"
+ *   "Principal Designer, Platform"          → "Designer Platform"
+ *   undefined                               → "engineer" (safe default)
+ */
+function deriveJobQuery(profile: UserProfile): string {
+  const recent = profile.experience?.[0]?.title ?? '';
+  let q = recent.trim();
+  if (!q) return 'engineer';
+
+  // Drop common seniority prefixes
+  q = q.replace(/^(senior|sr\.?|junior|jr\.?|lead|staff|principal|head of|vp,?\s+)\s+/i, '');
+
+  // Drop common suffixes that hurt match counts ("at Company")
+  q = q.replace(/\s+(at|@)\s+.+$/i, '');
+
+  // Collapse "Role - Department" / "Role, Department" to spaces
+  q = q.replace(/[,\-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Cap length
+  if (q.length > 40) q = q.slice(0, 40).trim();
+  return q || 'engineer';
 }
 
 function renderDigestHtml(name: string, matches: TailoredJobMatch[]): string {

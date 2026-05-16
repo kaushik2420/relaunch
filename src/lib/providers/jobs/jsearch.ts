@@ -54,8 +54,26 @@ export class JSearchProvider implements JobProvider {
       return [];
     }
 
-    const json: { data?: JSearchJob[] } = await res.json();
-    const mapped = (json.data ?? []).map(mapJSearch).filter((j): j is JobPosting => j !== null);
+    // JSearch v2 has shipped two response shapes depending on plan/tier:
+    //   1. { data: [...] }            ← classic v1 shape, sometimes still returned
+    //   2. { data: { jobs: [...] } }  ← newer nested shape
+    //   3. { status: "ERROR", ... }   ← when the query fails server-side
+    // Be defensive about all three so a schema tweak doesn't silently break us.
+    const json: { status?: string; data?: unknown; error_message?: string } = await res.json();
+    if (json.status && json.status !== 'OK') {
+      console.warn(`[jsearch] status=${json.status} message=${json.error_message ?? ''}`);
+      return [];
+    }
+    let rawJobs: JSearchJob[] = [];
+    if (Array.isArray(json.data)) {
+      rawJobs = json.data as JSearchJob[];
+    } else if (json.data && typeof json.data === 'object' && Array.isArray((json.data as { jobs?: unknown }).jobs)) {
+      rawJobs = (json.data as { jobs: JSearchJob[] }).jobs;
+    } else {
+      console.warn('[jsearch] unexpected response shape — keys:', json.data ? Object.keys(json.data as object) : 'no data');
+    }
+
+    const mapped = rawJobs.map(mapJSearch).filter((j): j is JobPosting => j !== null);
     console.log(`[jsearch] ${location || '*'} → ${mapped.length} jobs`);
     return mapped;
   }
