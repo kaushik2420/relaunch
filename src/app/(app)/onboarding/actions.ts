@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { expandToMatchTerms } from "@/lib/locations";
 
 export async function saveProfileAction(formData: FormData) {
   const sb = createSupabaseServer();
@@ -62,10 +63,13 @@ export async function savePreferencesAction(formData: FormData) {
   } = await sb.auth.getUser();
   if (!user) redirect("/login");
 
-  const locations = String(formData.get("locations") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // New picker-based form: posts one `locationIds` hidden input per selected
+  // option. Expand each id to its full list of match terms (e.g. "Bengaluru"
+  // → ["Bengaluru", "Bangalore", "BLR"]) so the job matcher catches every
+  // common spelling without us touching the filter logic.
+  const locationIds = formData.getAll("locationIds").map(String);
+  const locations = expandToMatchTerms(locationIds);
+
   const workModes = formData.getAll("workModes").map(String);
 
   const emailFrequency = String(formData.get("emailFrequency") ?? "daily");

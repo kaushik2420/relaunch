@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { savePreferencesAction } from '../actions';
 import { Stepper } from '@/components/Stepper';
+import { LocationPicker } from './LocationPicker';
+import { detectSelectedIds } from '@/lib/locations';
 
 export default async function PreferencesPage() {
   const sb = createSupabaseServer();
@@ -13,7 +15,8 @@ export default async function PreferencesPage() {
     .eq('id', user.id)
     .single();
 
-  const locations = (row?.locations ?? []).join(', ');
+  // Reverse-map saved match terms → option ids so the picker shows current state
+  const initialSelectedIds = detectSelectedIds(row?.locations ?? []);
   const modes = row?.work_modes ?? ['remote', 'hybrid'];
 
   return (
@@ -24,15 +27,7 @@ export default async function PreferencesPage() {
         <p className="mt-1 text-sm text-ink-soft">We'll use this to find roles that fit your life — not just your skills.</p>
 
         <form action={savePreferencesAction} className="mt-6 space-y-4">
-          <div>
-            <label className="label">Preferred location(s)</label>
-            <input
-              name="locations"
-              defaultValue={locations}
-              placeholder="e.g. Bengaluru, Hyderabad, Remote"
-              className="input"
-            />
-          </div>
+          <LocationPicker initialSelectedIds={initialSelectedIds} />
 
           <div>
             <label className="label">Work mode (pick any)</label>
