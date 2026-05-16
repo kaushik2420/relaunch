@@ -78,7 +78,9 @@ export interface TailoredJobMatch {
   reasons: string[];
   tailored: TailoredResume;
   tailoredResumeUrl?: string;   // URL to PDF in user's Drive
-  referrers: Referrer[];
+  referrers: Referrer[];        // legacy — populated only if a LinkedIn data API is wired
+  /** Pre-built LinkedIn people-search URL — opens 2nd-degree connections at the target company. Free alternative to Proxycurl/Apollo. */
+  connectionsSearchUrl?: string;
   inmailDraft?: { subject: string; body: string };
   expectedCtc?: string;
 }

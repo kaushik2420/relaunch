@@ -1,120 +1,75 @@
-import type { Referrer, UserProfile, JobPosting } from '@/lib/types';
+import type { JobPosting } from '@/lib/types';
 
 /**
- * Find 1–2 people at the target company who could potentially help the
- * user get noticed. Uses Proxycurl's Person Search API.
+ * Build a LinkedIn people-search URL that opens the user's
+ * **2nd-degree connections** at the target company, filtered by a title
+ * keyword guess. This is our default "find a referrer" experience — no
+ * API cost, no data sharing, and the user sees their actual network.
  *
- * Setup:
- *   1. Sign up at https://nubela.co/proxycurl
- *   2. Add a $5 credit pack (gives ~1000 lookups @ $0.005 each)
- *   3. Copy your API key from dashboard
- *   4. Set env: PROXYCURL_API_KEY=<your-key>
- *   5. Redeploy. Done — referrers will start showing up in the daily Sheet.
+ * Why not Proxycurl/Apollo: those APIs run $0.005–0.05 per lookup, which
+ * scales linearly with users. At 500 users that's $750/mo just to show
+ * names. The deep-link gives the user MORE useful info (their actual
+ * 2nd-degree network, not strangers) at $0 cost.
  *
- * Falls back gracefully (returns []) if no key is set, so the rest of
- * the pipeline keeps working.
- *
- * https://nubela.co/proxycurl/docs#people-api-person-search-endpoint
+ * When the user clicks this in the Sheet, LinkedIn opens in a new tab.
+ * If they're logged in, they see 2nd-degree connections at the company.
+ * If they're not, they see a generic people search and can filter further.
  */
-export async function findReferrers(input: {
-  profile: UserProfile;
+export function buildConnectionsSearchUrl(input: {
+  company: string;
+  title: string;
+}): string {
+  const titleKeywords = inferReferrerTitleKeywords(input.title);
+  // LinkedIn's people-search accepts keywords + network filter
+  // network=["S"] → 2nd-degree only (1st = "F"). We omit "F" because if
+  // they already have 1st-degree contacts they'd probably reach out directly.
+  const keywords = `${input.company} ${titleKeywords}`;
+  const url = new URL('https://www.linkedin.com/search/results/people/');
+  url.searchParams.set('keywords', keywords);
+  url.searchParams.set('network', '["S"]');
+  url.searchParams.set('origin', 'FACETED_SEARCH');
+  return url.toString();
+}
+
+/**
+ * Map the job title to one or two referrer titles. We aim ~one level
+ * UP from the candidate's likely target (Director if they're applying for
+ * Senior, Hiring Manager if they're applying as IC, etc.) because that's
+ * who can actually move a referral.
+ */
+function inferReferrerTitleKeywords(targetTitle: string): string {
+  const t = targetTitle.toLowerCase();
+  if (/principal|staff|head|director|vp/.test(t)) {
+    return 'VP OR Director';
+  }
+  if (/senior|sr\b/.test(t)) {
+    return '"Engineering Manager" OR Director';
+  }
+  if (/manager|lead/.test(t)) {
+    return 'Director OR "Senior Manager"';
+  }
+  if (/engineer|developer/.test(t)) {
+    return '"Engineering Manager" OR "Senior Engineer"';
+  }
+  if (/product manager|pm\b/.test(t)) {
+    return '"Senior Product Manager" OR "Director of Product"';
+  }
+  if (/designer/.test(t)) {
+    return '"Design Manager" OR "Senior Designer"';
+  }
+  return 'Manager OR Director';
+}
+
+/**
+ * Legacy signature kept for backwards compatibility — returns an empty
+ * array since we no longer hit a paid API. If you later want to wire
+ * Proxycurl, Apollo, or LinkedIn OAuth, return real Referrer[] here and
+ * the rest of the pipeline picks them up automatically.
+ */
+export async function findReferrers(_input: {
+  profile: unknown;
   job: JobPosting;
   limit?: number;
-}): Promise<Referrer[]> {
-  const apiKey = process.env.PROXYCURL_API_KEY;
-  if (!apiKey) return [];
-
-  const { profile, job, limit = 2 } = input;
-
-  // Build a search: people at the target company in roles related to the JD
-  // We avoid asking for the candidate's exact title — we want hiring managers
-  // and engineers one level above the target, who are more likely to help.
-  const titleHint = inferTargetReferrerTitle(profile, job);
-  const params = new URLSearchParams({
-    page_size: String(Math.min(limit * 3, 10)), // overfetch + filter
-    current_company_name: job.company,
-    current_role_title: titleHint,
-    enrich_profiles: 'enrich',
-  });
-
-  try {
-    const res = await fetch(`https://nubela.co/proxycurl/api/v2/search/person/?${params}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      // Same lookup is fine to cache for a few days
-      next: { revalidate: 86400 },
-    });
-    if (!res.ok) return [];
-
-    const json: { results?: ProxycurlSearchResult[] } = await res.json();
-    const results = (json.results ?? []).slice(0, limit);
-
-    return results.map((r): Referrer => {
-      const p = r.profile ?? {};
-      return {
-        name: p.full_name || r.profile_name || 'Someone at the company',
-        role: p.occupation || titleHint,
-        linkedinUrl: r.linkedin_profile_url || undefined,
-        sharedContext: deriveSharedContext(profile, p),
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-
-function inferTargetReferrerTitle(profile: UserProfile, job: JobPosting): string {
-  const title = job.title.toLowerCase();
-  // Aim one level above for engineers / PMs / designers
-  if (/principal|staff|head|director|vp/i.test(profile.seniority)) return 'Director';
-  if (/senior/i.test(profile.seniority)) return 'Engineering Manager';
-  if (/engineer|developer/.test(title)) return 'Senior Engineer';
-  if (/product manager|pm\b/.test(title)) return 'Senior Product Manager';
-  if (/designer/.test(title)) return 'Senior Designer';
-  return 'Senior';
-}
-
-interface ProxycurlPersonProfile {
-  full_name?: string;
-  occupation?: string;
-  experiences?: { company?: string; title?: string; starts_at?: { year?: number } }[];
-  education?: { school?: string }[];
-  city?: string;
-}
-
-interface ProxycurlSearchResult {
-  linkedin_profile_url?: string;
-  profile_name?: string;
-  profile?: ProxycurlPersonProfile;
-}
-
-/**
- * Look for a shared signal the user can lead the InMail with — same
- * past employer, same school, same city. Returns undefined if nothing
- * compelling is found (better to lead with the role than a weak link).
- */
-function deriveSharedContext(profile: UserProfile, p: ProxycurlPersonProfile): string | undefined {
-  // Same past company
-  const userCompanies = new Set(profile.experience?.map((e) => e.company.toLowerCase()) ?? []);
-  const theirCompanies = (p.experiences ?? []).map((e) => e.company?.toLowerCase()).filter(Boolean) as string[];
-  for (const c of theirCompanies) {
-    if (userCompanies.has(c)) {
-      return `Both worked at ${capitalize(c)}`;
-    }
-  }
-  // Same school
-  const userSchools = new Set(profile.education?.map((e) => e.school.toLowerCase()) ?? []);
-  for (const e of p.education ?? []) {
-    if (e.school && userSchools.has(e.school.toLowerCase())) {
-      return `Both studied at ${e.school}`;
-    }
-  }
-  // Same city
-  if (p.city && profile.location && p.city.toLowerCase() === profile.location.toLowerCase()) {
-    return `Both based in ${p.city}`;
-  }
-  return undefined;
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+}): Promise<[]> {
+  return [];
 }

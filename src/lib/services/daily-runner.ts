@@ -5,7 +5,7 @@ import { rankJobs } from './job-matcher';
 import { llm } from '@/lib/providers/llm';
 import { sheets } from '@/lib/providers/sheets';
 import { email as emailProvider } from '@/lib/providers/email';
-import { findReferrers } from './referrer-finder';
+import { findReferrers, buildConnectionsSearchUrl } from './referrer-finder';
 import type { TailoredJobMatch, UserProfile, UserPreferences } from '@/lib/types';
 
 /**
@@ -75,7 +75,16 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
         }
       }
 
-      // (c) Find referrers (no-op when PROXYCURL_API_KEY isn't set)
+      // (c) Build a LinkedIn deep-link to the user's 2nd-degree network
+      //     at this company. Free, more private, more useful than paid APIs.
+      const connectionsSearchUrl = buildConnectionsSearchUrl({
+        company: job.company,
+        title: job.title,
+      });
+
+      // Optional: if a future LinkedIn data API is wired, this populates names.
+      // For now this always returns [] (no API cost). Kept so the pipeline
+      // gracefully starts using names the moment a provider is plugged in.
       let referrers: TailoredJobMatch['referrers'] = [];
       try {
         referrers = await findReferrers({ profile, job, limit: 2 });
@@ -83,19 +92,20 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
         console.error('findReferrers failed', err);
       }
 
-      // (d) InMail — always draft, even without a referrer
+      // (d) InMail — always draft. If we ever have a specific referrer
+      // (e.g. LinkedIn OAuth populates it later), use the first one.
       let inmailDraft: TailoredJobMatch['inmailDraft'] | undefined;
       try {
         inmailDraft = await llm().draftInmail({
           profile,
           job,
-          referrer: referrers[0], // undefined if list empty → generic version
+          referrer: referrers[0],
         });
       } catch (err) {
         console.error('draftInmail failed', err);
       }
 
-      return { job, matchPercent, reasons, tailored, tailoredResumeUrl, referrers, inmailDraft };
+      return { job, matchPercent, reasons, tailored, tailoredResumeUrl, referrers, connectionsSearchUrl, inmailDraft };
     })
   );
 

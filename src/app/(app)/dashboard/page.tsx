@@ -180,12 +180,23 @@ function JobCard({ m }: { m: SheetMatchRow }) {
         <p className="mt-2 text-xs text-ink-soft">💰 {m.expectedCtc}</p>
       )}
 
-      {m.referrers && (
+      {/* Referrer column may contain either real names ("Priya Sharma (Director)")
+          or a LinkedIn search URL we generated. Detect and render appropriately. */}
+      {m.referrers && /^https?:\/\//.test(m.referrers) ? (
+        <a
+          href={m.referrers}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 text-xs text-brand-700 hover:underline"
+        >
+          👋 Find your 2nd-degree connections at {m.company} →
+        </a>
+      ) : m.referrers ? (
         <p className="mt-2 text-xs">
           👋 <span className="text-ink-soft">Could help: </span>
           <span className="font-medium">{m.referrers}</span>
         </p>
-      )}
+      ) : null}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {m.jobUrl && (

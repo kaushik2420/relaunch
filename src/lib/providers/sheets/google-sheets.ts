@@ -117,7 +117,11 @@ export class GoogleSheetsProvider implements SheetsProvider {
       m.expectedCtc ?? '',
       m.job.url,
       m.tailoredResumeUrl ?? '',
-      m.referrers.map((r) => `${r.name} (${r.role})`).join(' | '),
+      // Referrer column: prefer real names if available; otherwise the
+      // LinkedIn-search deep link the user can click to find their own.
+      m.referrers.length
+        ? m.referrers.map((r) => `${r.name} (${r.role})`).join(' | ')
+        : (m.connectionsSearchUrl ?? ''),
       m.inmailDraft?.subject ?? '',
       'No',
       '',
