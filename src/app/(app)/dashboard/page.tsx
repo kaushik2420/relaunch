@@ -4,7 +4,7 @@ import { createSupabaseServer } from '@/lib/supabase/server';
 import { EmpathyBanner } from '@/components/EmpathyBanner';
 import { RunNowButton } from '@/components/RunNowButton';
 import { MissionChecklist } from '@/components/MissionChecklist';
-import { ReactionButtons } from '@/components/ReactionButtons';
+import { JobCard } from '@/components/JobCard';
 import { getTodayQuote } from '@/lib/quotes';
 import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 import { sheets } from '@/lib/providers/sheets';
@@ -209,72 +209,6 @@ function DailyQuote() {
   );
 }
 
-function JobCard({ m }: { m: SheetMatchRow }) {
-  const matchTone =
-    m.matchPercent >= 90 ? 'bg-success-soft text-success'
-    : m.matchPercent >= 75 ? 'bg-brand-50 text-brand-700'
-    : 'bg-accent-50 text-accent-600';
-
-  return (
-    <div className="card">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">{m.role}</h3>
-          <p className="text-sm text-ink-soft">{m.company} · {m.location || 'Location unspecified'}{m.mode && m.mode !== 'unknown' ? ` · ${m.mode}` : ''}</p>
-        </div>
-        {m.matchPercent > 0 && (
-          <span className={`px-3 py-1 rounded-full text-xs font-bold ${matchTone}`}>
-            {m.matchPercent}% match
-          </span>
-        )}
-      </div>
-
-      {m.expectedCtc && (
-        <p className="mt-2 text-xs text-ink-soft">💰 {m.expectedCtc}</p>
-      )}
-
-      {/* Referrer column may contain either real names ("Priya Sharma (Director)")
-          or a LinkedIn search URL we generated. Detect and render appropriately. */}
-      {m.referrers && /^https?:\/\//.test(m.referrers) ? (
-        <a
-          href={m.referrers}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-flex items-center gap-1 text-xs text-brand-700 hover:underline"
-        >
-          👋 Find your 2nd-degree connections at {m.company} →
-        </a>
-      ) : m.referrers ? (
-        <p className="mt-2 text-xs">
-          👋 <span className="text-ink-soft">Could help: </span>
-          <span className="font-medium">{m.referrers}</span>
-        </p>
-      ) : null}
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {m.jobUrl && (
-          <a href={m.jobUrl} target="_blank" rel="noreferrer" className="btn-primary text-xs px-3 py-1.5">
-            View role ↗
-          </a>
-        )}
-        {m.tailoredResumeUrl && (
-          <a href={m.tailoredResumeUrl} target="_blank" rel="noreferrer" className="btn-soft text-xs px-3 py-1.5">
-            📄 Tailored resume
-          </a>
-        )}
-        {m.applied && (
-          <span className="chip-accent">Applied</span>
-        )}
-        {m.outcome && (
-          <span className="chip">{m.outcome}</span>
-        )}
-        <div className="ml-auto">
-          <ReactionButtons company={m.company} role={m.role} initial={m.reaction} />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function Stat({ num, label, sub, highlight }: { num: string; label: string; sub?: string; highlight?: boolean }) {
   return (

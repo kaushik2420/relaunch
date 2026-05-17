@@ -42,32 +42,62 @@ export class AdzunaProvider implements JobProvider {
 
     const results: JobPosting[] = [];
     for (const [country, loc] of groups) {
-      const params = new URLSearchParams({
-        app_id: cfg.ADZUNA_APP_ID,
-        app_key: cfg.ADZUNA_APP_KEY,
-        what: q.query,
-        where: loc,
-        results_per_page: String(Math.min(q.limit ?? 20, 50)),
-        max_days_old: String(q.postedWithinDays ?? 7),
-        content_type: 'application/json',
-      });
-      const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?${params}`;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          console.warn(`[adzuna] ${country}/${loc} → HTTP ${res.status}`);
-          continue;
+      // Try the user's exact query first. If empty, retry with just the
+      // last word (usually the role family — "Engineer", "Manager", etc.)
+      // Adzuna's `what` matcher is strict; broader queries return more.
+      let mapped = await this.callAdzuna(cfg.ADZUNA_APP_ID, cfg.ADZUNA_APP_KEY, country, loc, q);
+      if (mapped.length === 0) {
+        const broadQuery = lastWord(q.query);
+        if (broadQuery && broadQuery !== q.query) {
+          console.log(`[adzuna] ${country}/${loc || '*'} retrying with broader query "${broadQuery}"`);
+          mapped = await this.callAdzuna(cfg.ADZUNA_APP_ID, cfg.ADZUNA_APP_KEY, country, loc, {
+            ...q,
+            query: broadQuery,
+          });
         }
-        const data: { results: AdzunaResult[] } = await res.json();
-        const mapped = (data.results ?? []).map(mapAdzuna);
-        console.log(`[adzuna] ${country}/${loc || '*'} → ${mapped.length} jobs`);
-        results.push(...mapped);
-      } catch (err) {
-        console.warn(`[adzuna] ${country}/${loc} → ${(err as Error).message}`);
       }
+      console.log(`[adzuna] ${country}/${loc || '*'} → ${mapped.length} jobs`);
+      results.push(...mapped);
     }
     return results;
   }
+
+  private async callAdzuna(
+    appId: string,
+    appKey: string,
+    country: string,
+    loc: string,
+    q: JobSearchQuery,
+  ): Promise<JobPosting[]> {
+    const params = new URLSearchParams({
+      app_id: appId,
+      app_key: appKey,
+      what: q.query,
+      where: loc,
+      results_per_page: String(Math.min(q.limit ?? 20, 50)),
+      max_days_old: String(q.postedWithinDays ?? 14),
+      content_type: 'application/json',
+    });
+    const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?${params}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`[adzuna] ${country}/${loc} → HTTP ${res.status} — ${await res.text().catch(() => '')}`);
+        return [];
+      }
+      const data: { results: AdzunaResult[] } = await res.json();
+      return (data.results ?? []).map(mapAdzuna);
+    } catch (err) {
+      console.warn(`[adzuna] ${country}/${loc} → ${(err as Error).message}`);
+      return [];
+    }
+  }
+}
+
+/** "Product Manager Growth" → "Manager". Returns '' if input has 0-1 words. */
+function lastWord(s: string): string {
+  const parts = s.trim().split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 1]! : '';
 }
 
 interface AdzunaResult {

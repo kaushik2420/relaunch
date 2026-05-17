@@ -15,10 +15,14 @@ export function ReactionButtons({
   company,
   role,
   initial,
+  onHide,
 }: {
   company: string;
   role: string;
   initial: '' | 'liked' | 'hidden';
+  /** Called the moment a thumbs-down is confirmed locally — lets the
+   *  parent JobCard hide itself without waiting for the server refresh. */
+  onHide?: () => void;
 }) {
   const router = useRouter();
   const [reaction, setReaction] = useState<'' | 'liked' | 'hidden'>(initial);
@@ -29,6 +33,11 @@ export function ReactionButtons({
     const previous = reaction;
     setReaction(next); // optimistic
     setError(null);
+
+    // Hide instantly — don't wait for the API roundtrip or server refresh.
+    // The Sheet write happens in the background; if it fails we revert.
+    if (next === 'hidden' && onHide) onHide();
+
     try {
       const res = await fetch('/api/matches/react', {
         method: 'POST',
@@ -36,12 +45,15 @@ export function ReactionButtons({
         body: JSON.stringify({ company, role, reaction: next }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Failed');
-      // Refresh server data so a 👎 actually hides from the list
+      // Refresh server data so the change persists across reloads / filters
       startTransition(() => router.refresh());
     } catch (e) {
       setReaction(previous); // revert
       setError((e as Error).message);
       setTimeout(() => setError(null), 3000);
+      // Note: we can't un-hide the parent here. If onHide already fired
+      // and the API failed, the card stays gone on this render but will
+      // come back on next reload since the Sheet wasn't updated.
     }
   }
 
