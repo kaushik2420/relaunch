@@ -1,6 +1,7 @@
 import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
+import { findRoleFamily } from '@/lib/role-families';
 
 /**
  * Adzuna — free tier: 1k calls/day, decent India + global coverage.
@@ -105,29 +106,12 @@ function lastWord(s: string): string {
 }
 
 /**
- * Map our role-family enum to Adzuna's category slug.
+ * Map a role-family id to Adzuna's category slug.
+ * Source of truth is src/lib/role-families.ts — this just looks it up.
  * Adzuna's full list: https://api.adzuna.com/v1/api/jobs/{country}/categories
- * Engineering/Product/Data/Design in tech all map to "it-jobs" because
- * that's where Adzuna actually catalogs them. Marketing and Sales have
- * their own. Operations doesn't have a clean fit so we leave it blank.
  */
 function adzunaCategory(rf?: string): string | null {
-  switch (rf) {
-    case 'engineering':
-    case 'product':
-    case 'data':
-      return 'it-jobs';
-    case 'design':
-      return 'creative-design-jobs';
-    case 'marketing':
-      return 'pr-advertising-marketing-jobs';
-    case 'sales':
-      return 'sales-jobs';
-    case 'operations':
-    case 'other':
-    default:
-      return null; // no filter — broaden the net
-  }
+  return findRoleFamily(rf)?.adzunaCategory ?? null;
 }
 
 interface AdzunaResult {

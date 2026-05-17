@@ -4,6 +4,7 @@ import { savePreferencesAction } from '../actions';
 import { Stepper } from '@/components/Stepper';
 import { LocationPicker } from './LocationPicker';
 import { detectSelectedIds } from '@/lib/locations';
+import { roleFamiliesByGroup } from '@/lib/role-families';
 
 export default async function PreferencesPage() {
   const sb = createSupabaseServer();
@@ -37,14 +38,13 @@ export default async function PreferencesPage() {
               className="input"
             >
               <option value="">— pick one (helps us search better) —</option>
-              <option value="engineering">Engineering / Development</option>
-              <option value="product">Product Management</option>
-              <option value="design">Design (UX / UI / Visual)</option>
-              <option value="data">Data / Analytics / ML</option>
-              <option value="marketing">Marketing / Growth</option>
-              <option value="operations">Operations / Program Mgmt</option>
-              <option value="sales">Sales / Business Development</option>
-              <option value="other">Something else</option>
+              {roleFamiliesByGroup().map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.items.map((r) => (
+                    <option key={r.id} value={r.id}>{r.label}</option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
             <p className="mt-1 text-xs text-ink-mute">
               We use this to scope each job source to the right category — big recall boost.

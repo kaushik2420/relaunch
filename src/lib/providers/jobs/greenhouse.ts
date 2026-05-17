@@ -2,6 +2,7 @@ import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
 import { defaultGreenhouseBoards } from '@/lib/greenhouse-boards';
+import { findRoleFamily } from '@/lib/role-families';
 
 /**
  * Greenhouse — many top tech companies expose a public board API at
@@ -83,21 +84,12 @@ function matchesQuery(j: GhJob, q: JobSearchQuery): boolean {
 }
 
 /**
- * Family-keyword signals — what shows up in titles across boards.
+ * Family-keyword signals — pulled from the central role-family registry.
  * Title-only check (cheap); content match would balloon the result set.
  */
 function matchesFamily(titleLower: string, family: string): boolean {
-  const signals: Record<string, string[]> = {
-    engineering: ['engineer', 'developer', 'sde', 'software', 'backend', 'frontend', 'fullstack', 'platform', 'devops', 'sre', 'infrastructure', 'mobile', 'ios', 'android'],
-    product: ['product manager', 'product owner', 'pm,', 'pm ', 'growth pm', 'principal product'],
-    design: ['designer', 'ux', 'ui', 'product design', 'visual design'],
-    data: ['data scientist', 'data analyst', 'data engineer', 'analytics', 'machine learning', 'ml ', 'ai ', 'mlops'],
-    marketing: ['marketing', 'growth marketer', 'content', 'brand', 'demand gen', 'lifecycle'],
-    operations: ['operations', 'ops', 'program manager', 'project manager', 'chief of staff'],
-    sales: ['sales', 'account executive', 'ae,', 'sdr', 'bdr', 'revenue', 'business development'],
-  };
-  const list = signals[family] ?? [];
-  return list.some((s) => titleLower.includes(s));
+  const signals = findRoleFamily(family)?.greenhouseSignals ?? [];
+  return signals.some((s) => titleLower.includes(s));
 }
 
 function mapGreenhouse(board: string, j: GhJob): JobPosting {

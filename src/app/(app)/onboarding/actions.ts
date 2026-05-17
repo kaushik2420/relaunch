@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { expandToMatchTerms } from "@/lib/locations";
+import { ROLE_FAMILY_IDS } from "@/lib/role-families";
 
 export async function saveProfileAction(formData: FormData) {
   const sb = createSupabaseServer();
@@ -75,10 +76,7 @@ export async function savePreferencesAction(formData: FormData) {
   const emailFrequency = String(formData.get("emailFrequency") ?? "daily");
   const timezone = String(formData.get("timezone") ?? "Asia/Kolkata");
   const roleFamilyRaw = String(formData.get("roleFamily") ?? "").trim();
-  const ALLOWED_ROLE_FAMILIES = new Set([
-    "engineering", "product", "design", "data", "marketing", "operations", "sales", "other",
-  ]);
-  const roleFamily = ALLOWED_ROLE_FAMILIES.has(roleFamilyRaw) ? roleFamilyRaw : null;
+  const roleFamily = ROLE_FAMILY_IDS.has(roleFamilyRaw) ? roleFamilyRaw : null;
 
   await sb
     .from("users")
