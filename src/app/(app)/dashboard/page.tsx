@@ -25,7 +25,7 @@ export default async function DashboardPage({
 
   const { data: row } = await sb
     .from('users')
-    .select('first_name, signup_position, cohort, last_run_at, user_sheet_id, profile, locations, google_refresh_token_enc')
+    .select('first_name, signup_position, cohort, last_run_at, user_sheet_id, profile, locations, google_refresh_token_enc, timezone')
     .eq('id', user.id)
     .single();
 
@@ -52,14 +52,17 @@ export default async function DashboardPage({
   }
 
   const stats = computeStats(matches, row?.profile, !!row?.user_sheet_id);
-  const greeting = greetingFor(new Date());
+  // Greeting follows the user's preferred timezone so "Good morning" still
+  // feels right when they open the app from anywhere.
+  const tz = (row?.timezone as string | null) || 'Asia/Kolkata';
+  const greeting = greetingFor(new Date(), tz);
   const lastRunAt = row?.last_run_at ? new Date(row.last_run_at) : null;
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold">{greeting}, {row?.first_name ?? 'friend'} 🌅</h1>
+          <h1 className="text-3xl font-bold">{greeting}, {row?.first_name ?? 'friend'} 💼</h1>
           <p className="text-ink-soft mt-0.5">
             {matches.length > 0
               ? `${matches.length} matches in your tracker · last run ${formatRelative(lastRunAt)}`
@@ -74,10 +77,31 @@ export default async function DashboardPage({
       </header>
 
       <div className="grid gap-4 md:grid-cols-4 mb-6">
-        <Stat highlight num={`${stats.profileStrength}%`} label="Profile strength" sub={stats.profileStrengthHint} />
-        <Stat num={String(stats.matchesThisWeek)} label="Matches (last 7d)" sub={stats.matchesThisWeek > 0 ? '🔍 ranked for you' : 'No matches yet'} />
-        <Stat num={String(stats.applicationsSent)} label="Applications sent" sub={stats.applicationsSent > 0 ? `${stats.awaiting} awaiting reply` : 'Tracked by you'} />
-        <Stat num={String(stats.interviews)} label="Interviews" sub={stats.interviews > 0 ? '🎉 keep going' : 'They\'re ahead'} />
+        <Stat
+          highlight
+          num={`${stats.profileStrength}%`}
+          label="Profile strength"
+          sub={stats.profileStrengthHint}
+          tooltip="Built from your profile completeness: parsed resume, skills count, preferences saved, and Google connected. Update your profile in Settings to lift this."
+        />
+        <Stat
+          num={String(stats.matchesThisWeek)}
+          label="Matches (last 7d)"
+          sub={stats.matchesThisWeek > 0 ? '🔍 ranked for you' : 'No matches yet'}
+          tooltip="Counts rows added to your Google Sheet in the last 7 days. We pull fresh roles each morning — or hit 'Find matches now' on the right."
+        />
+        <Stat
+          num={String(stats.applicationsSent)}
+          label="Applications sent"
+          sub={stats.applicationsSent > 0 ? `${stats.awaiting} awaiting reply` : 'Tracked by you'}
+          tooltip="Counts rows where the 'Applied' column in your Google Sheet is TRUE. Tick that column as you apply and this updates the next time the dashboard loads."
+        />
+        <Stat
+          num={String(stats.interviews)}
+          label="Interviews"
+          sub={stats.interviews > 0 ? '🎉 keep going' : "They're ahead"}
+          tooltip="Counts rows whose 'Outcome' column in your Sheet mentions interview, screen, or onsite. Type your status in that column as the process moves."
+        />
       </div>
 
       <DailyQuote />
@@ -216,12 +240,53 @@ function DailyQuote() {
 }
 
 
-function Stat({ num, label, sub, highlight }: { num: string; label: string; sub?: string; highlight?: boolean }) {
+function Stat({
+  num,
+  label,
+  sub,
+  highlight,
+  tooltip,
+}: {
+  num: string;
+  label: string;
+  sub?: string;
+  highlight?: boolean;
+  tooltip?: string;
+}) {
   return (
-    <div className={`card p-4 ${highlight ? 'bg-gradient-to-br from-brand-500 to-brand-700 text-white border-transparent' : ''}`}>
-      <div className="text-2xl font-bold">{num}</div>
+    <div
+      className={`group relative card p-4 ${highlight ? 'bg-gradient-to-br from-brand-500 to-brand-700 text-white border-transparent' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-2xl font-bold">{num}</div>
+        {tooltip && (
+          <span
+            tabIndex={0}
+            aria-label={tooltip}
+            className={`mt-1 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-[10px] font-bold ${
+              highlight
+                ? 'bg-white/25 text-white hover:bg-white/35'
+                : 'bg-surface-soft text-ink-soft hover:bg-line'
+            }`}
+          >
+            ?
+          </span>
+        )}
+      </div>
       <div className={`text-xs mt-0.5 ${highlight ? 'opacity-90' : 'text-ink-soft'}`}>{label}</div>
-      {sub && <div className={`text-xs mt-1 font-semibold ${highlight ? 'opacity-90' : 'text-success'}`}>{sub}</div>}
+      {sub && (
+        <div className={`text-xs mt-1 font-semibold ${highlight ? 'opacity-90' : 'text-success'}`}>{sub}</div>
+      )}
+      {tooltip && (
+        // CSS-only tooltip: shown on hover/focus-within of the parent.
+        // Positioned below so it doesn't get clipped by the stats row.
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute left-3 right-3 top-full z-10 mt-2 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink shadow-lg opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          {tooltip}
+        </div>
+      )}
     </div>
   );
 }
@@ -287,8 +352,27 @@ function computeStats(
   return { profileStrength: strength, profileStrengthHint: hint, matchesThisWeek, applicationsSent, awaiting, interviews };
 }
 
-function greetingFor(d: Date): string {
-  const h = d.getHours();
+/**
+ * Greeting in the user's preferred timezone. We use Intl to extract the
+ * hour-of-day in that TZ so server clock doesn't matter — a user in
+ * Bengaluru opening the app at 10am IST always sees "Good morning"
+ * even though the server may be UTC 04:30.
+ *
+ * Falls back to server-local hour if the timezone string is invalid.
+ */
+function greetingFor(d: Date, timezone: string): string {
+  let h: number;
+  try {
+    const hourStr = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      hour12: false,
+      timeZone: timezone,
+    }).format(d);
+    h = Number(hourStr);
+    if (!Number.isFinite(h)) h = d.getHours();
+  } catch {
+    h = d.getHours();
+  }
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
