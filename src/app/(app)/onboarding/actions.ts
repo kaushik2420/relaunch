@@ -74,6 +74,11 @@ export async function savePreferencesAction(formData: FormData) {
 
   const emailFrequency = String(formData.get("emailFrequency") ?? "daily");
   const timezone = String(formData.get("timezone") ?? "Asia/Kolkata");
+  const roleFamilyRaw = String(formData.get("roleFamily") ?? "").trim();
+  const ALLOWED_ROLE_FAMILIES = new Set([
+    "engineering", "product", "design", "data", "marketing", "operations", "sales", "other",
+  ]);
+  const roleFamily = ALLOWED_ROLE_FAMILIES.has(roleFamilyRaw) ? roleFamilyRaw : null;
 
   await sb
     .from("users")
@@ -86,6 +91,7 @@ export async function savePreferencesAction(formData: FormData) {
       timezone,
       email_frequency: emailFrequency,
       notes: String(formData.get("notes") ?? "") || null,
+      role_family: roleFamily,
     })
     .eq("id", user.id);
 

@@ -32,6 +32,8 @@ export interface ProviderResult {
   name: string;
   count: number;
   error?: string;
+  /** Human-readable summary of what we searched for. Shown in dashboard. */
+  searched?: string;
 }
 
 /** Module-level: latest provider summary from the most recent fetch.
@@ -46,13 +48,19 @@ export async function fetchJobsFromAll(q: JobSearchQuery): Promise<JobPosting[]>
   const settled = await Promise.allSettled(ps.map((p) => p.search(q)));
   const all: JobPosting[] = [];
 
+  // Human-readable "what we searched for" — same for every provider since
+  // they all see the same JobSearchQuery. Individual providers may massage it
+  // differently internally but this gives the user a clear picture.
+  const searched =
+    `"${q.query}"${q.roleFamily ? ` · ${q.roleFamily}` : ''} in ${q.locations.slice(0, 3).join(', ') || 'anywhere'}`;
+
   const summary: ProviderResult[] = settled.map((s, i) => {
     const name = ps[i]!.name;
     if (s.status === 'fulfilled') {
       all.push(...s.value);
-      return { name, count: s.value.length };
+      return { name, count: s.value.length, searched };
     }
-    return { name, count: 0, error: (s.reason as Error).message };
+    return { name, count: 0, error: (s.reason as Error).message, searched };
   });
   _lastSummary = summary;
   console.log('[jobs] per-provider counts:', summary);

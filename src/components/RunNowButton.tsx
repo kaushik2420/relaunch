@@ -6,6 +6,7 @@ interface ProviderResult {
   name: string;
   count: number;
   error?: string;
+  searched?: string;
 }
 
 interface RunResponse {
@@ -77,6 +78,9 @@ export function RunNowButton() {
       {providers.length > 0 && (
         <div className="mt-3 rounded-lg bg-surface-page p-2 text-[11px] space-y-1">
           <div className="text-ink-mute uppercase tracking-wider mb-1">Sources</div>
+          {providers[0]?.searched && (
+            <div className="text-ink-soft mb-2 italic">Searched: {providers[0].searched}</div>
+          )}
           {providers.map((p) => (
             <div key={p.name} className="flex justify-between gap-2">
               <span className="text-ink-soft">{p.name}</span>

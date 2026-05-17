@@ -78,6 +78,10 @@ export class AdzunaProvider implements JobProvider {
       max_days_old: String(q.postedWithinDays ?? 14),
       content_type: 'application/json',
     });
+    // Big recall win: scoping by category param when we know the role family.
+    // Without this, Adzuna keyword-only matches are weirdly narrow.
+    const category = adzunaCategory(q.roleFamily);
+    if (category) params.set('category', category);
     const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?${params}`;
     try {
       const res = await fetch(url);
@@ -98,6 +102,32 @@ export class AdzunaProvider implements JobProvider {
 function lastWord(s: string): string {
   const parts = s.trim().split(/\s+/);
   return parts.length > 1 ? parts[parts.length - 1]! : '';
+}
+
+/**
+ * Map our role-family enum to Adzuna's category slug.
+ * Adzuna's full list: https://api.adzuna.com/v1/api/jobs/{country}/categories
+ * Engineering/Product/Data/Design in tech all map to "it-jobs" because
+ * that's where Adzuna actually catalogs them. Marketing and Sales have
+ * their own. Operations doesn't have a clean fit so we leave it blank.
+ */
+function adzunaCategory(rf?: string): string | null {
+  switch (rf) {
+    case 'engineering':
+    case 'product':
+    case 'data':
+      return 'it-jobs';
+    case 'design':
+      return 'creative-design-jobs';
+    case 'marketing':
+      return 'pr-advertising-marketing-jobs';
+    case 'sales':
+      return 'sales-jobs';
+    case 'operations':
+    case 'other':
+    default:
+      return null; // no filter — broaden the net
+  }
 }
 
 interface AdzunaResult {

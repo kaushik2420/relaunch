@@ -35,11 +35,12 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // strip seniority words (the API filters those separately if at all),
   // and cap to ~40 chars. Falls back to a sensible default if needed.
   const query = deriveJobQuery(profile);
-  console.log(`[daily-runner] query="${query}" locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
+  console.log(`[daily-runner] query="${query}" roleFamily=${userRow.role_family ?? '(none)'} locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
   const jobs = await fetchJobsFromAll({
     query,
     locations: prefs.locations.length ? prefs.locations : ['India'],
     workMode: prefs.workModes[0] ?? 'any',
+    roleFamily: (userRow.role_family as 'engineering' | 'product' | 'design' | 'data' | 'marketing' | 'operations' | 'sales' | 'other' | null) ?? undefined,
     limit: 60,
     postedWithinDays: 7,
   });
@@ -208,7 +209,7 @@ export async function pickUsersForThisHour(now = new Date()) {
   const { data, error } = await supabaseAdmin()
     .from('users')
     .select(
-      'id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying'
+      'id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family'
     )
     .eq('is_active', true)
     .neq('email_frequency', 'paused');
@@ -265,4 +266,5 @@ export interface UserRow {
   last_run_at: string | null;
   free_until: string;
   is_paying: boolean | null;
+  role_family?: string | null;
 }

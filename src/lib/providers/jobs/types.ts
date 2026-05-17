@@ -1,5 +1,15 @@
 import type { JobPosting } from '@/lib/types';
 
+export type RoleFamily =
+  | 'engineering'
+  | 'product'
+  | 'design'
+  | 'data'
+  | 'marketing'
+  | 'operations'
+  | 'sales'
+  | 'other';
+
 export interface JobSearchQuery {
   /** Keywords / role */
   query: string;
@@ -11,6 +21,8 @@ export interface JobSearchQuery {
   limit?: number;
   /** Only roles posted within this many days */
   postedWithinDays?: number;
+  /** Role family — used by providers to translate to their own category schema */
+  roleFamily?: RoleFamily;
 }
 
 export interface JobProvider {

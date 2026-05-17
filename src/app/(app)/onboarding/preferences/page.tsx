@@ -11,13 +11,14 @@ export default async function PreferencesPage() {
   if (!user) redirect('/login');
   const { data: row } = await sb
     .from('users')
-    .select('locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone')
+    .select('locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, role_family')
     .eq('id', user.id)
     .single();
 
   // Reverse-map saved match terms → option ids so the picker shows current state
   const initialSelectedIds = detectSelectedIds(row?.locations ?? []);
   const modes = row?.work_modes ?? ['remote', 'hybrid'];
+  const currentRoleFamily = (row?.role_family as string | null) ?? '';
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
@@ -27,6 +28,29 @@ export default async function PreferencesPage() {
         <p className="mt-1 text-sm text-ink-soft">We'll use this to find roles that fit your life — not just your skills.</p>
 
         <form action={savePreferencesAction} className="mt-6 space-y-4">
+          <div>
+            <label className="label" htmlFor="roleFamily">What kind of role are you targeting?</label>
+            <select
+              id="roleFamily"
+              name="roleFamily"
+              defaultValue={currentRoleFamily}
+              className="input"
+            >
+              <option value="">— pick one (helps us search better) —</option>
+              <option value="engineering">Engineering / Development</option>
+              <option value="product">Product Management</option>
+              <option value="design">Design (UX / UI / Visual)</option>
+              <option value="data">Data / Analytics / ML</option>
+              <option value="marketing">Marketing / Growth</option>
+              <option value="operations">Operations / Program Mgmt</option>
+              <option value="sales">Sales / Business Development</option>
+              <option value="other">Something else</option>
+            </select>
+            <p className="mt-1 text-xs text-ink-mute">
+              We use this to scope each job source to the right category — big recall boost.
+            </p>
+          </div>
+
           <LocationPicker initialSelectedIds={initialSelectedIds} />
 
           <div>

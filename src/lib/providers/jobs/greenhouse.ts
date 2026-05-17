@@ -59,18 +59,45 @@ interface GhJob {
 }
 
 function matchesQuery(j: GhJob, q: JobSearchQuery): boolean {
+  // Two-pass keyword match: if exact query doesn't hit, try role family
+  // signal words (e.g. roleFamily=product → "product", "pm", "growth").
+  // This way users with quirky resume titles still see real matches.
+  const titleLower = j.title.toLowerCase();
+  const contentLower = j.content.toLowerCase();
   const needle = q.query.toLowerCase();
-  if (!j.title.toLowerCase().includes(needle) && !j.content.toLowerCase().includes(needle)) {
-    return false;
-  }
+  const exactHit = titleLower.includes(needle) || contentLower.includes(needle);
+  const familyHit = q.roleFamily ? matchesFamily(titleLower, q.roleFamily) : false;
+  if (!exactHit && !familyHit) return false;
+
   if (q.locations.length) {
     const haystack = j.location.name.toLowerCase();
-    const anyMatch = q.locations.some((l) =>
-      l === '' || haystack.includes(l.toLowerCase()) || l.toLowerCase() === 'remote' && /remote/.test(haystack)
+    const anyMatch = q.locations.some(
+      (l) =>
+        l === '' ||
+        haystack.includes(l.toLowerCase()) ||
+        (l.toLowerCase() === 'remote' && /remote/.test(haystack)),
     );
     if (!anyMatch) return false;
   }
   return true;
+}
+
+/**
+ * Family-keyword signals — what shows up in titles across boards.
+ * Title-only check (cheap); content match would balloon the result set.
+ */
+function matchesFamily(titleLower: string, family: string): boolean {
+  const signals: Record<string, string[]> = {
+    engineering: ['engineer', 'developer', 'sde', 'software', 'backend', 'frontend', 'fullstack', 'platform', 'devops', 'sre', 'infrastructure', 'mobile', 'ios', 'android'],
+    product: ['product manager', 'product owner', 'pm,', 'pm ', 'growth pm', 'principal product'],
+    design: ['designer', 'ux', 'ui', 'product design', 'visual design'],
+    data: ['data scientist', 'data analyst', 'data engineer', 'analytics', 'machine learning', 'ml ', 'ai ', 'mlops'],
+    marketing: ['marketing', 'growth marketer', 'content', 'brand', 'demand gen', 'lifecycle'],
+    operations: ['operations', 'ops', 'program manager', 'project manager', 'chief of staff'],
+    sales: ['sales', 'account executive', 'ae,', 'sdr', 'bdr', 'revenue', 'business development'],
+  };
+  const list = signals[family] ?? [];
+  return list.some((s) => titleLower.includes(s));
 }
 
 function mapGreenhouse(board: string, j: GhJob): JobPosting {
