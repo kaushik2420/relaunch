@@ -1,6 +1,7 @@
 import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
+import { defaultGreenhouseBoards } from '@/lib/greenhouse-boards';
 
 /**
  * Greenhouse — many top tech companies expose a public board API at
@@ -14,11 +15,12 @@ export class GreenhouseProvider implements JobProvider {
   readonly name = 'greenhouse';
 
   async search(q: JobSearchQuery): Promise<JobPosting[]> {
-    const boards = serverConfig().GREENHOUSE_BOARDS.split(',').map((s) => s.trim()).filter(Boolean);
-    if (!boards.length) {
-      console.warn('[greenhouse] GREENHOUSE_BOARDS env var is empty — set it to e.g. "razorpay,stripe,airbnb,vercel"');
-      return [];
-    }
+    // Env var wins if explicitly set (testing override). Otherwise use
+    // the curated in-code list — that means Greenhouse "just works" without
+    // any env setup.
+    const envBoards = serverConfig().GREENHOUSE_BOARDS.split(',').map((s) => s.trim()).filter(Boolean);
+    const boards = envBoards.length > 0 ? envBoards : defaultGreenhouseBoards();
+    console.log(`[greenhouse] scanning ${boards.length} boards (source: ${envBoards.length ? 'env override' : 'curated default'})`);
 
     const allJobs: JobPosting[] = [];
     await Promise.all(
