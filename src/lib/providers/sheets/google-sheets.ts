@@ -185,7 +185,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
     // Newest first — the cron appends so the newest is at the bottom.
     const ordered = [...rows].reverse().slice(0, limit);
 
-    return ordered
+    const parsed = ordered
       .map((r): SheetMatchRow | null => {
         if (!r || r.length === 0) return null;
         const pctStr = (r[3] ?? '').toString().replace('%', '').trim();
@@ -209,6 +209,30 @@ export class GoogleSheetsProvider implements SheetsProvider {
         };
       })
       .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
+
+    // Dedupe by (company, role) — older Sheets accumulated duplicates
+    // before write-time dedup landed. We keep the FIRST occurrence here,
+    // which (because we just reversed to newest-first) is the most recent
+    // row. If ANY duplicate row has a reaction set, we propagate it onto
+    // the kept row so the filter does the right thing even if the user
+    // historically reacted to an older copy.
+    const seen = new Map<string, SheetMatchRow>();
+    for (const row of parsed) {
+      const key = `${row.company.toLowerCase()}|${row.role.toLowerCase()}`;
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, row);
+        continue;
+      }
+      // Same job already kept (newer). Carry the strongest reaction forward.
+      // Priority: hidden > liked > '' — hiding is intentional, should win.
+      if (existing.reaction === '' && row.reaction !== '') {
+        existing.reaction = row.reaction;
+      } else if (existing.reaction === 'liked' && row.reaction === 'hidden') {
+        existing.reaction = 'hidden';
+      }
+    }
+    return [...seen.values()];
   }
 
   // ----------------------------------------------------------------
@@ -257,15 +281,18 @@ export class GoogleSheetsProvider implements SheetsProvider {
       spreadsheetId: input.spreadsheetId,
       range: 'Daily Matches!B2:C',
     });
+    // Collect ALL matching rows — duplicates from past runs each need
+    // their own column-O write so they share the same reaction. Older
+    // sheets may have several copies of the same (company, role).
     const target = matchKey(input.company, input.role);
-    let rowIndex = -1;
+    const matchedRows: number[] = [];
     (res.data.values ?? []).forEach((row, i) => {
       const [c, r] = row;
       if (typeof c === 'string' && typeof r === 'string' && matchKey(c, r) === target) {
-        rowIndex = i + 2; // +1 for 1-indexed, +1 to skip header
+        matchedRows.push(i + 2); // +1 for 1-indexed, +1 to skip header
       }
     });
-    if (rowIndex < 0) {
+    if (matchedRows.length === 0) {
       console.warn(`[setReaction] no row matched company="${input.company}" role="${input.role}"`);
       return;
     }
@@ -277,13 +304,18 @@ export class GoogleSheetsProvider implements SheetsProvider {
         ? '👎 hidden'
         : '';
 
-    await sheets.spreadsheets.values.update({
+    // batchUpdate handles writing multiple disjoint cells in one round-trip
+    await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: input.spreadsheetId,
-      range: `Daily Matches!O${rowIndex}`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [[value]] },
+      requestBody: {
+        valueInputOption: 'RAW',
+        data: matchedRows.map((rowIdx) => ({
+          range: `Daily Matches!O${rowIdx}`,
+          values: [[value]],
+        })),
+      },
     });
-    console.log(`[setReaction] row ${rowIndex} → "${value}" (${input.company} / ${input.role})`);
+    console.log(`[setReaction] ${matchedRows.length} row(s) ${matchedRows.join(',')} → "${value}" (${input.company} / ${input.role})`);
   }
 }
 
