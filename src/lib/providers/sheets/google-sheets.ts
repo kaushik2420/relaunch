@@ -171,7 +171,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
   }
 
   // ----------------------------------------------------------------
-  async readMatches(spreadsheetId: string, refreshToken: string, limit = 50): Promise<SheetMatchRow[]> {
+  async readMatches(spreadsheetId: string, refreshToken: string, limit = 300): Promise<SheetMatchRow[]> {
     const sheets = this.sheetsClient(refreshToken);
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
@@ -265,7 +265,10 @@ export class GoogleSheetsProvider implements SheetsProvider {
         rowIndex = i + 2; // +1 for 1-indexed, +1 to skip header
       }
     });
-    if (rowIndex < 0) return; // row not found — silently no-op
+    if (rowIndex < 0) {
+      console.warn(`[setReaction] no row matched company="${input.company}" role="${input.role}"`);
+      return;
+    }
 
     const value =
       input.reaction === 'liked'
@@ -280,6 +283,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
       valueInputOption: 'RAW',
       requestBody: { values: [[value]] },
     });
+    console.log(`[setReaction] row ${rowIndex} → "${value}" (${input.company} / ${input.role})`);
   }
 }
 
@@ -289,9 +293,16 @@ function matchKey(company: string, role: string): string {
 }
 
 function parseReaction(raw: string): '' | 'liked' | 'hidden' {
-  const lower = raw.toLowerCase();
-  if (lower.includes('like') || raw.includes('👍')) return 'liked';
-  if (lower.includes('hide') || lower.includes('hidden') || raw.includes('👎')) return 'hidden';
+  if (!raw) return '';
+  const norm = raw.trim().toLowerCase();
+  // Order matters: check 'hidden' first because "👎 hidden" also contains
+  // some innocuous characters; we don't want partial matches flipping.
+  if (norm.includes('👎') || norm.includes('hidden') || norm.includes('hide') || norm.includes('dislike')) {
+    return 'hidden';
+  }
+  if (norm.includes('👍') || norm.includes('liked') || norm.includes('like')) {
+    return 'liked';
+  }
   return '';
 }
 

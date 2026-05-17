@@ -13,15 +13,18 @@ import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 export const dynamic = 'force-dynamic'; // never cache — Sheet content changes every day
 
+const PAGE_SIZE = 20;
+
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: { filter?: string };
+  searchParams: { filter?: string; page?: string };
 }) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
   const showLikedOnly = searchParams.filter === 'liked';
+  const currentPage = Math.max(1, Number(searchParams.page ?? '1') || 1);
 
   const { data: row } = await sb
     .from('users')
@@ -160,27 +163,54 @@ export default async function DashboardPage({
             </EmpathyBanner>
           )}
 
-          <div className="space-y-3">
-            {[...matches]
-              // Filter: drop 👎 hidden always; if "Liked only", keep just 👍
+          {(() => {
+            // Filter → sort → paginate, then render. All in one IIFE so we
+            // can compute the page count up front.
+            const visible = matches
+              // Drop 👎 hidden always; if "Liked only", keep just 👍
               .filter((m) =>
                 showLikedOnly ? m.reaction === 'liked' : m.reaction !== 'hidden',
               )
-              // Sort by match % descending — highest at top — tie-break by date.
+              // NEW: sort by DATE descending — newest matches first.
+              // Tie-break by match % so equally-fresh strong matches beat
+              // weaker ones from the same day.
               .sort((a, b) => {
-                if (b.matchPercent !== a.matchPercent) return b.matchPercent - a.matchPercent;
-                return new Date(b.date).getTime() - new Date(a.date).getTime();
-              })
-              .slice(0, 12)
-              .map((m, i) => (
-                <JobCard key={`${m.company}::${m.role}::${i}`} m={m} />
-              ))}
-          </div>
-          {showLikedOnly && matches.filter((m) => m.reaction === 'liked').length === 0 && (
-            <p className="mt-4 text-sm text-ink-soft">
-              No liked roles yet. Hit 👍 on a job card to save it here.
-            </p>
-          )}
+                const da = new Date(a.date).getTime();
+                const db = new Date(b.date).getTime();
+                if (db !== da) return db - da;
+                return b.matchPercent - a.matchPercent;
+              });
+
+            const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+            const page = Math.min(currentPage, totalPages);
+            const start = (page - 1) * PAGE_SIZE;
+            const slice = visible.slice(start, start + PAGE_SIZE);
+
+            return (
+              <>
+                <div className="space-y-3">
+                  {slice.map((m, i) => (
+                    <JobCard key={`${m.company}::${m.role}::${start + i}`} m={m} />
+                  ))}
+                </div>
+
+                {visible.length === 0 && showLikedOnly && (
+                  <p className="mt-4 text-sm text-ink-soft">
+                    No liked roles yet. Hit 👍 on a job card to save it here.
+                  </p>
+                )}
+
+                {totalPages > 1 && (
+                  <Pagination
+                    page={page}
+                    totalPages={totalPages}
+                    showLikedOnly={showLikedOnly}
+                    visibleCount={visible.length}
+                  />
+                )}
+              </>
+            );
+          })()}
         </section>
       </div>
 
@@ -209,6 +239,44 @@ function DailyQuote() {
   );
 }
 
+
+/** Lightweight page controls — Prev / page indicator / Next. Preserves
+ *  the current filter via the URL so navigation feels coherent. */
+function Pagination({
+  page,
+  totalPages,
+  showLikedOnly,
+  visibleCount,
+}: {
+  page: number;
+  totalPages: number;
+  showLikedOnly: boolean;
+  visibleCount: number;
+}) {
+  const base = showLikedOnly ? '/dashboard?filter=liked' : '/dashboard';
+  const sep = showLikedOnly ? '&' : '?';
+  const prev = page > 1 ? `${base}${sep}page=${page - 1}` : null;
+  const next = page < totalPages ? `${base}${sep}page=${page + 1}` : null;
+  return (
+    <div className="mt-6 flex items-center justify-between gap-2 text-sm">
+      <div className="text-xs text-ink-mute">
+        Page {page} of {totalPages} · {visibleCount} matches
+      </div>
+      <div className="flex gap-1">
+        {prev ? (
+          <Link href={prev} className="btn-soft px-3 py-1.5 text-xs">← Prev</Link>
+        ) : (
+          <span className="btn-soft px-3 py-1.5 text-xs opacity-40 cursor-not-allowed">← Prev</span>
+        )}
+        {next ? (
+          <Link href={next} className="btn-soft px-3 py-1.5 text-xs">Next →</Link>
+        ) : (
+          <span className="btn-soft px-3 py-1.5 text-xs opacity-40 cursor-not-allowed">Next →</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function Stat({ num, label, sub, highlight }: { num: string; label: string; sub?: string; highlight?: boolean }) {
   return (
