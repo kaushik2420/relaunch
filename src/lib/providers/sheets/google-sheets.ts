@@ -352,7 +352,6 @@ function renderResumeText(input: {
 }): string {
   const lines: string[] = [];
   lines.push(input.candidateName.toUpperCase());
-  lines.push(`Tailored for ${input.role} at ${input.company}`);
   lines.push('');
   lines.push('SUMMARY');
   lines.push(input.tailored.summary);
