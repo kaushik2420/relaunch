@@ -88,15 +88,15 @@ function JobRow({ m }: { m: SheetMatchRow }) {
               📄
             </a>
           )}
-          {m.tailoredResumeDocUrl && (
+          {m.coverLetterUrl && (
             <a
-              href={m.tailoredResumeDocUrl}
+              href={m.coverLetterUrl}
               target="_blank"
               rel="noreferrer"
               className="text-xs text-brand-700 hover:underline whitespace-nowrap"
-              title="Edit résumé in Google Docs"
+              title="Cover letter (PDF)"
             >
-              ✏️
+              ✉️
             </a>
           )}
           <ReactionButtons

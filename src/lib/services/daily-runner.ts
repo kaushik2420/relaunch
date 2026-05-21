@@ -66,24 +66,32 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
       : null;
 
   // 3. For each top match, in parallel:
-  //    (a) tailor the resume content via Claude
-  //    (b) create a Google Doc with that content in user's Drive
+  //    (a) tailor the resume + draft a cover letter via Claude
+  //    (b) render both to Drive (PDF + editable .docx each)
   //    (c) look up 1-2 potential referrers (Proxycurl; no-op if no key)
   //    (d) draft an InMail addressed to the referrer (or generic if none)
   // Each step is wrapped in try/catch — a single failure shouldn't kill
   // the whole match. Better to ship a partial row than nothing.
   const matches: TailoredJobMatch[] = await Promise.all(
     top.map(async ({ job, matchPercent, reasons }) => {
-      const tailored = await llm().tailorResume({
-        profile,
-        job,
-        pivotBrief: pivotBrief ?? undefined,
-      });
+      // (a) Resume tailoring + cover letter — independent Claude calls,
+      //     run them together. tailorResume is required (throw kills the
+      //     match); a cover-letter failure just drops the letter.
+      const [tailored, coverLetter] = await Promise.all([
+        llm().tailorResume({ profile, job, pivotBrief: pivotBrief ?? undefined }),
+        llm()
+          .draftCoverLetter({ profile, job, pivotBrief: pivotBrief ?? undefined })
+          .catch((err) => {
+            console.error('draftCoverLetter failed', err);
+            return undefined;
+          }),
+      ]);
 
-      // (b) Save tailored resume to Drive — both an editable Doc and a
-      //     polished PDF (PDF is exported from that Doc so they match).
+      // (b) Save the resume to Drive — polished PDF + editable .docx.
       let tailoredResumeUrl: string | undefined;
       let tailoredResumeDocUrl: string | undefined;
+      let coverLetterUrl: string | undefined;
+      let coverLetterDocUrl: string | undefined;
       if (refreshToken) {
         try {
           const r = await sheets().createTailoredResume({
@@ -97,6 +105,23 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
           tailoredResumeDocUrl = r.docUrl;
         } catch (err) {
           console.error('createTailoredResume failed', err);
+        }
+
+        // Cover letter to Drive — also PDF + editable .docx.
+        if (coverLetter) {
+          try {
+            const c = await sheets().createCoverLetter({
+              refreshToken,
+              company: job.company,
+              role: job.title,
+              profile,
+              letter: coverLetter,
+            });
+            coverLetterUrl = c.pdfUrl;
+            coverLetterDocUrl = c.docUrl;
+          } catch (err) {
+            console.error('createCoverLetter failed', err);
+          }
         }
       }
 
@@ -130,7 +155,20 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
         console.error('draftInmail failed', err);
       }
 
-      return { job, matchPercent, reasons, tailored, tailoredResumeUrl, tailoredResumeDocUrl, referrers, connectionsSearchUrl, inmailDraft };
+      return {
+        job,
+        matchPercent,
+        reasons,
+        tailored,
+        tailoredResumeUrl,
+        tailoredResumeDocUrl,
+        coverLetter,
+        coverLetterUrl,
+        coverLetterDocUrl,
+        referrers,
+        connectionsSearchUrl,
+        inmailDraft,
+      };
     })
   );
 

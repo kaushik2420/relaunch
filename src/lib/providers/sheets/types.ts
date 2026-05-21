@@ -1,4 +1,4 @@
-import type { TailoredJobMatch, TailoredResume, UserProfile } from '@/lib/types';
+import type { TailoredJobMatch, TailoredResume, UserProfile, CoverLetter } from '@/lib/types';
 
 /**
  * One row out of the user's "Daily Matches" tab. Same shape as the
@@ -16,8 +16,12 @@ export interface SheetMatchRow {
   jobUrl: string;
   /** Link to the polished PDF resume in the user's Drive. */
   tailoredResumeUrl: string;
-  /** Link to the editable Google Doc version of the resume. */
+  /** Link to the editable .docx version of the resume. */
   tailoredResumeDocUrl: string;
+  /** Link to the cover-letter PDF. */
+  coverLetterUrl: string;
+  /** Link to the editable .docx version of the cover letter. */
+  coverLetterDocUrl: string;
   referrers: string;
   inmailSubject: string;
   applied: boolean;
@@ -52,6 +56,18 @@ export interface SheetsProvider {
     role: string;
     profile: UserProfile;
     tailored: TailoredResume;
+  }): Promise<{ docUrl: string; pdfUrl: string }>;
+
+  /**
+   * Create the tailored cover letter in the user's Drive — a polished
+   * PDF plus an editable .docx. Returns both links.
+   */
+  createCoverLetter(input: {
+    refreshToken: string;
+    company: string;
+    role: string;
+    profile: UserProfile;
+    letter: CoverLetter;
   }): Promise<{ docUrl: string; pdfUrl: string }>;
 
   /**

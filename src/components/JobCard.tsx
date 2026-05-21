@@ -75,17 +75,17 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
             rel="noreferrer"
             className="btn-soft text-xs px-3 py-1.5"
           >
-            📄 Résumé (PDF)
+            📄 Résumé
           </a>
         )}
-        {m.tailoredResumeDocUrl && (
+        {m.coverLetterUrl && (
           <a
-            href={m.tailoredResumeDocUrl}
+            href={m.coverLetterUrl}
             target="_blank"
             rel="noreferrer"
             className="btn-soft text-xs px-3 py-1.5"
           >
-            ✏️ Edit in Docs
+            ✉️ Cover letter
           </a>
         )}
         {m.applied && <span className="chip-accent">Applied</span>}
@@ -99,6 +99,33 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
           />
         </div>
       </div>
+
+      {(m.tailoredResumeDocUrl || m.coverLetterDocUrl) && (
+        <p className="mt-2 text-xs text-ink-soft">
+          Editable copies:{' '}
+          {m.tailoredResumeDocUrl && (
+            <a
+              href={m.tailoredResumeDocUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-brand-700 hover:underline"
+            >
+              résumé
+            </a>
+          )}
+          {m.tailoredResumeDocUrl && m.coverLetterDocUrl && ' · '}
+          {m.coverLetterDocUrl && (
+            <a
+              href={m.coverLetterDocUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-brand-700 hover:underline"
+            >
+              cover letter
+            </a>
+          )}
+        </p>
+      )}
     </div>
   );
 }

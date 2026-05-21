@@ -1,9 +1,9 @@
 import { google, sheets_v4 } from 'googleapis';
 import { serverConfig } from '@/lib/config';
 import type { SheetsProvider, SheetMatchRow } from './types';
-import type { TailoredJobMatch, UserProfile, TailoredResume } from '@/lib/types';
-import { renderResumePdf } from '@/lib/resume/render-pdf';
-import { renderResumeDocx } from '@/lib/resume/render-docx';
+import type { TailoredJobMatch, UserProfile, TailoredResume, CoverLetter } from '@/lib/types';
+import { renderResumePdf, renderCoverLetterPdf } from '@/lib/resume/render-pdf';
+import { renderResumeDocx, renderCoverLetterDocx } from '@/lib/resume/render-docx';
 import { Readable } from 'node:stream';
 
 const DOCX_MIME =
@@ -24,8 +24,10 @@ const HEADERS = [
   'Applied?',
   'Outcome',
   'Notes',
-  'Reaction',          // column O — '👍 liked' / '👎 hidden' / ''
-  'Resume (Editable)', // column P — editable Google Doc link
+  'Reaction',             // column O — '👍 liked' / '👎 hidden' / ''
+  'Resume (Editable)',    // column P — editable .docx link
+  'Cover Letter (PDF)',   // column Q
+  'Cover Letter (Editable)', // column R — editable .docx link
 ];
 
 export class GoogleSheetsProvider implements SheetsProvider {
@@ -161,7 +163,9 @@ export class GoogleSheetsProvider implements SheetsProvider {
       '',
       '',
       '', // Reaction (column O) — starts blank
-      m.tailoredResumeDocUrl ?? '', // column P — editable Doc
+      m.tailoredResumeDocUrl ?? '', // column P — editable resume .docx
+      m.coverLetterUrl ?? '',       // column Q — cover letter PDF
+      m.coverLetterDocUrl ?? '',    // column R — editable cover letter .docx
     ]);
     await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -192,10 +196,11 @@ export class GoogleSheetsProvider implements SheetsProvider {
     const sheets = this.sheetsClient(refreshToken);
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      // Skip the header row (A1). Columns A:P — O is Reaction, P is the
-      // editable-Doc link. Sheets created before a column was added just
-      // return short rows; we default missing cells to '' below.
-      range: 'Daily Matches!A2:P',
+      // Skip the header row (A1). Columns A:R — O is Reaction, P is the
+      // editable resume .docx, Q/R are the cover-letter links. Sheets
+      // created before a column was added just return short rows; we
+      // default missing cells to '' below.
+      range: 'Daily Matches!A2:R',
     });
     const rows = res.data.values ?? [];
 
@@ -224,6 +229,8 @@ export class GoogleSheetsProvider implements SheetsProvider {
           notes: (r[13] ?? '').toString(),
           reaction: parseReaction((r[14] ?? '').toString()),
           tailoredResumeDocUrl: (r[15] ?? '').toString(),
+          coverLetterUrl: (r[16] ?? '').toString(),
+          coverLetterDocUrl: (r[17] ?? '').toString(),
         };
       })
       .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
@@ -273,6 +280,45 @@ export class GoogleSheetsProvider implements SheetsProvider {
     ]);
 
     // Upload both to the user's Drive in parallel.
+    const [pdf, docx] = await Promise.all([
+      drive.files.create({
+        requestBody: { name: `${baseName}.pdf`, mimeType: 'application/pdf' },
+        media: { mimeType: 'application/pdf', body: Readable.from([pdfBuffer]) },
+        fields: 'id, webViewLink',
+      }),
+      drive.files.create({
+        requestBody: { name: `${baseName}.docx`, mimeType: DOCX_MIME },
+        media: { mimeType: DOCX_MIME, body: Readable.from([docxBuffer]) },
+        fields: 'id, webViewLink',
+      }),
+    ]);
+
+    const pdfId = pdf.data.id;
+    const docxId = docx.data.id;
+    if (!pdfId || !docxId) throw new Error('Google Drive did not return a file id');
+
+    const pdfUrl = pdf.data.webViewLink ?? `https://drive.google.com/file/d/${pdfId}/view`;
+    const docUrl = docx.data.webViewLink ?? `https://drive.google.com/file/d/${docxId}/view`;
+
+    return { docUrl, pdfUrl };
+  }
+
+  // ----------------------------------------------------------------
+  async createCoverLetter(input: {
+    refreshToken: string;
+    company: string;
+    role: string;
+    profile: UserProfile;
+    letter: CoverLetter;
+  }): Promise<{ docUrl: string; pdfUrl: string }> {
+    const drive = google.drive({ version: 'v3', auth: this.auth(input.refreshToken) });
+    const baseName = `Cover Letter — ${input.company} · ${input.role}`;
+
+    const [pdfBuffer, docxBuffer] = await Promise.all([
+      renderCoverLetterPdf(input.profile, input.letter, input.company, input.role),
+      renderCoverLetterDocx(input.profile, input.letter, input.company, input.role),
+    ]);
+
     const [pdf, docx] = await Promise.all([
       drive.files.create({
         requestBody: { name: `${baseName}.pdf`, mimeType: 'application/pdf' },

@@ -6,7 +6,7 @@ import {
   StyleSheet,
   renderToBuffer,
 } from '@react-pdf/renderer';
-import type { UserProfile, TailoredResume } from '@/lib/types';
+import type { UserProfile, TailoredResume, CoverLetter } from '@/lib/types';
 
 /**
  * Polished two-column resume PDF, rendered with @react-pdf/renderer.
@@ -184,6 +184,84 @@ export async function renderResumePdf(
   tailored: TailoredResume,
 ): Promise<Buffer> {
   return renderToBuffer(<ResumeDocument profile={profile} tailored={tailored} />);
+}
+
+// ---------------------------------------------------------------
+// Cover letter
+// ---------------------------------------------------------------
+
+const cl = StyleSheet.create({
+  page: {
+    paddingVertical: 54,
+    paddingHorizontal: 56,
+    fontFamily: 'Helvetica',
+    fontSize: 10.5,
+    color: INK,
+  },
+  name: { fontSize: 20, fontFamily: 'Helvetica-Bold', color: INK, letterSpacing: 0.3 },
+  contact: { fontSize: 8.5, color: MUTE, marginTop: 5 },
+  divider: { borderBottomWidth: 1.5, borderBottomColor: ACCENT, marginTop: 11, marginBottom: 22 },
+  date: { fontSize: 9.5, color: MUTE, marginBottom: 16 },
+  subject: { fontSize: 10.5, fontFamily: 'Helvetica-Bold', color: ACCENT, marginBottom: 18 },
+  greeting: { marginBottom: 12 },
+  para: { marginBottom: 11 },
+  closing: { marginTop: 6 },
+  signName: { fontFamily: 'Helvetica-Bold', marginTop: 2 },
+});
+
+function CoverLetterDocument({
+  profile,
+  letter,
+  company,
+  role,
+}: {
+  profile: UserProfile;
+  letter: CoverLetter;
+  company: string;
+  role: string;
+}) {
+  const name = (profile.fullName || 'Your Name').trim();
+  const today = new Date().toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  return (
+    <Document title={`${name} — Cover Letter`} author={name}>
+      <Page size="A4" style={cl.page}>
+        <Text style={cl.name}>{name}</Text>
+        <Text style={cl.contact}>{contactLine(profile)}</Text>
+        <View style={cl.divider} />
+
+        <Text style={cl.date}>{today}</Text>
+        <Text style={cl.subject}>
+          Re: Application for {role}
+          {company ? ` at ${company}` : ''}
+        </Text>
+
+        <Text style={cl.greeting}>{letter.greeting}</Text>
+        {letter.paragraphs.map((p, i) => (
+          <Text key={i} style={cl.para}>{p}</Text>
+        ))}
+
+        <Text style={cl.closing}>{letter.closing}</Text>
+        <Text style={cl.signName}>{name}</Text>
+      </Page>
+    </Document>
+  );
+}
+
+/** Render the tailored cover letter to a PDF buffer. */
+export async function renderCoverLetterPdf(
+  profile: UserProfile,
+  letter: CoverLetter,
+  company: string,
+  role: string,
+): Promise<Buffer> {
+  return renderToBuffer(
+    <CoverLetterDocument profile={profile} letter={letter} company={company} role={role} />,
+  );
 }
 
 // ---------------------------------------------------------------

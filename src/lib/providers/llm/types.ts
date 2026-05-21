@@ -9,7 +9,13 @@
  * Prompts live in /src/lib/services where context is clearer.
  */
 
-import type { JobPosting, UserProfile, TailoredResume, PivotBrief } from '@/lib/types';
+import type {
+  JobPosting,
+  UserProfile,
+  TailoredResume,
+  PivotBrief,
+  CoverLetter,
+} from '@/lib/types';
 
 export interface LLMProvider {
   /** Returns structured JSON; must NOT invent skills/facts. */
@@ -51,6 +57,17 @@ export interface LLMProvider {
     job: JobPosting;
     referrer?: { name: string; role: string; sharedContext?: string };
   }): Promise<{ subject: string; body: string }>;
+
+  /**
+   * Drafts a tailored cover letter for a specific job. Warm, confident,
+   * specific — never desperate, and never mentions a layoff. When
+   * pivotBrief is supplied, frames the career change as intentional.
+   */
+  draftCoverLetter(input: {
+    profile: UserProfile;
+    job: JobPosting;
+    pivotBrief?: PivotBrief;
+  }): Promise<CoverLetter>;
 
   /** Embeds text for similarity matching. Cheap, batched. */
   embed(texts: string[]): Promise<number[][]>;

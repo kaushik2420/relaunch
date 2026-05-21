@@ -1,7 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { serverConfig } from '@/lib/config';
 import type { LLMProvider } from './types';
-import type { JobPosting, UserProfile, TailoredResume, PivotBrief } from '@/lib/types';
+import type {
+  JobPosting,
+  UserProfile,
+  TailoredResume,
+  PivotBrief,
+  CoverLetter,
+} from '@/lib/types';
 import { ROLE_FAMILIES, ROLE_FAMILY_IDS } from '@/lib/role-families';
 
 /**
@@ -261,6 +267,60 @@ Output STRICT JSON: { "subject": string, "body": string }`;
     });
 
     return extractJSON<{ subject: string; body: string }>(message);
+  }
+
+  // ----------------------------------------------------------------
+  // draftCoverLetter — a tailored cover letter for one job
+  // ----------------------------------------------------------------
+  async draftCoverLetter({
+    profile,
+    job,
+    pivotBrief,
+  }: {
+    profile: UserProfile;
+    job: JobPosting;
+    pivotBrief?: PivotBrief;
+  }): Promise<CoverLetter> {
+    const pivotBlock = pivotBrief
+      ? `\nCAREER PIVOT: This candidate is intentionally moving into a new kind of role. Their plan: "${pivotBrief.refinedSummary}". Frame the change as a deliberate, strength-based choice — connect their transferable experience to this role. Never apologize for the switch.`
+      : '';
+
+    const prompt = `Write a tailored cover letter for this job application.
+
+CANDIDATE PROFILE (only use facts present here — never invent):
+${JSON.stringify(profile, null, 2)}
+
+TARGET JOB:
+Company: ${job.company}
+Role: ${job.title}
+Description:
+${job.description.slice(0, 3500)}${pivotBlock}
+
+Output STRICT JSON:
+{
+  "greeting": string,      // e.g. "Dear ${job.company} Hiring Team,"
+  "paragraphs": string[],  // exactly 3 body paragraphs
+  "closing": string        // e.g. "Warm regards,"
+}
+
+Rules:
+- 3 paragraphs, ~230-300 words total. Paragraph 1: why this role at this company, with a genuine hook. Paragraph 2: 2-3 concrete, relevant accomplishments from the profile that map to the job. Paragraph 3: a brief, forward-looking close.
+- Warm, confident, specific. Never desperate, never generic filler.
+- NEVER mention being laid off, "between roles", unemployment, or any gap. Write as a strong candidate.
+- Use ONLY achievements the candidate actually claims. Keep all numbers exact.
+- Plain prose — no bullet points, no markdown, no placeholders like [Company].`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 900,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const out = extractJSON<CoverLetter>(message);
+    return {
+      greeting: (out.greeting ?? `Dear ${job.company} Hiring Team,`).trim(),
+      paragraphs: (out.paragraphs ?? []).map((p) => p.trim()).filter(Boolean),
+      closing: (out.closing ?? 'Warm regards,').trim(),
+    };
   }
 
   // ----------------------------------------------------------------

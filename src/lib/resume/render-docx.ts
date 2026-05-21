@@ -10,7 +10,7 @@ import {
   BorderStyle,
   ShadingType,
 } from 'docx';
-import type { UserProfile, TailoredResume } from '@/lib/types';
+import type { UserProfile, TailoredResume, CoverLetter } from '@/lib/types';
 
 /**
  * Editable two-column resume as a real .docx file.
@@ -98,6 +98,82 @@ export async function renderResumeDocx(
                 ],
               }),
             ],
+          }),
+        ],
+      },
+    ],
+  });
+
+  return Packer.toBuffer(doc);
+}
+
+/**
+ * Editable cover letter as a .docx — single column, standard letter
+ * format. Mirrors the PDF cover letter so the two stay consistent.
+ */
+export async function renderCoverLetterDocx(
+  profile: UserProfile,
+  letter: CoverLetter,
+  company: string,
+  role: string,
+): Promise<Buffer> {
+  const name = (profile.fullName || 'Your Name').trim();
+  const today = new Date().toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const doc = new Document({
+    styles: {
+      default: { document: { run: { font: BASE_FONT, size: 21, color: INK } } },
+    },
+    sections: [
+      {
+        properties: {
+          page: { margin: { top: 1080, bottom: 1080, left: 1180, right: 1180 } },
+        },
+        children: [
+          new Paragraph({
+            children: [new TextRun({ text: name, bold: true, size: 40, color: INK })],
+          }),
+          new Paragraph({
+            spacing: { after: 200 },
+            border: { bottom: { style: BorderStyle.SINGLE, size: 8, space: 6, color: ACCENT } },
+            children: [new TextRun({ text: contactLine(profile), size: 17, color: MUTE })],
+          }),
+          new Paragraph({
+            spacing: { after: 200 },
+            children: [new TextRun({ text: today, size: 19, color: MUTE })],
+          }),
+          new Paragraph({
+            spacing: { after: 240 },
+            children: [
+              new TextRun({
+                text: `Re: Application for ${role}${company ? ` at ${company}` : ''}`,
+                bold: true,
+                size: 21,
+                color: ACCENT,
+              }),
+            ],
+          }),
+          new Paragraph({
+            spacing: { after: 160 },
+            children: [new TextRun({ text: letter.greeting, size: 21 })],
+          }),
+          ...letter.paragraphs.map(
+            (p) =>
+              new Paragraph({
+                spacing: { after: 160 },
+                children: [new TextRun({ text: p, size: 21 })],
+              }),
+          ),
+          new Paragraph({
+            spacing: { before: 80 },
+            children: [new TextRun({ text: letter.closing, size: 21 })],
+          }),
+          new Paragraph({
+            children: [new TextRun({ text: name, bold: true, size: 21 })],
           }),
         ],
       },

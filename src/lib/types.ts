@@ -65,6 +65,17 @@ export interface TailoredResume {
   removedSections: string[];
 }
 
+/**
+ * A tailored cover letter for one specific job posting. The renderers
+ * add the candidate's name/contact header, date, and signature — this
+ * holds only the parts Claude writes.
+ */
+export interface CoverLetter {
+  greeting: string;     // e.g. "Dear Hiring Team,"
+  paragraphs: string[]; // 3-4 body paragraphs
+  closing: string;      // e.g. "Warm regards,"
+}
+
 export interface Referrer {
   name: string;
   role: string;
@@ -95,8 +106,11 @@ export interface TailoredJobMatch {
   matchPercent: number;
   reasons: string[];
   tailored: TailoredResume;
-  tailoredResumeUrl?: string;     // URL to the polished PDF in user's Drive
-  tailoredResumeDocUrl?: string;  // URL to the editable Google Doc version
+  tailoredResumeUrl?: string;     // URL to the polished resume PDF in user's Drive
+  tailoredResumeDocUrl?: string;  // URL to the editable resume .docx
+  coverLetter?: CoverLetter;      // the tailored cover-letter content
+  coverLetterUrl?: string;        // URL to the cover-letter PDF
+  coverLetterDocUrl?: string;     // URL to the editable cover-letter .docx
   referrers: Referrer[];        // legacy — populated only if a LinkedIn data API is wired
   /** Pre-built LinkedIn people-search URL — opens 2nd-degree connections at the target company. Free alternative to Proxycurl/Apollo. */
   connectionsSearchUrl?: string;
