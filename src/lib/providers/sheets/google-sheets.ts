@@ -2,8 +2,12 @@ import { google, sheets_v4 } from 'googleapis';
 import { serverConfig } from '@/lib/config';
 import type { SheetsProvider, SheetMatchRow } from './types';
 import type { TailoredJobMatch, UserProfile, TailoredResume } from '@/lib/types';
-import { renderResumeHtml } from '@/lib/resume/render-html';
+import { renderResumePdf } from '@/lib/resume/render-pdf';
+import { renderResumeDocx } from '@/lib/resume/render-docx';
 import { Readable } from 'node:stream';
+
+const DOCX_MIME =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const HEADERS = [
   'Date',
@@ -258,44 +262,36 @@ export class GoogleSheetsProvider implements SheetsProvider {
     tailored: TailoredResume;
   }): Promise<{ docUrl: string; pdfUrl: string }> {
     const drive = google.drive({ version: 'v3', auth: this.auth(input.refreshToken) });
-    const html = renderResumeHtml(input.profile, input.tailored);
     const baseName = `Resume — ${input.company} · ${input.role}`;
 
-    // 1. Import the styled HTML straight into a formatted Google Doc.
-    //    Drive's HTML importer keeps headings, the two-column table,
-    //    colors and bullets — far richer than the old text/plain upload.
-    const doc = await drive.files.create({
-      requestBody: {
-        name: baseName,
-        mimeType: 'application/vnd.google-apps.document',
-      },
-      media: { mimeType: 'text/html', body: Readable.from([html]) },
-      fields: 'id',
-    });
-    const docId = doc.data.id;
-    if (!docId) throw new Error('Google Drive did not return a doc id');
-    const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
+    // Render both formats from the same data:
+    //   - PDF  : polished, submission-ready (via @react-pdf/renderer)
+    //   - DOCX : editable in Word / Google Docs / Pages
+    const [pdfBuffer, docxBuffer] = await Promise.all([
+      renderResumePdf(input.profile, input.tailored),
+      renderResumeDocx(input.profile, input.tailored),
+    ]);
 
-    // 2. Export that same Doc to PDF — guarantees the PDF and Doc look
-    //    identical (no separate PDF renderer to keep in sync).
-    const exported = await drive.files.export(
-      { fileId: docId, mimeType: 'application/pdf' },
-      { responseType: 'arraybuffer' },
-    );
-    const pdfBuffer = Buffer.from(exported.data as ArrayBuffer);
+    // Upload both to the user's Drive in parallel.
+    const [pdf, docx] = await Promise.all([
+      drive.files.create({
+        requestBody: { name: `${baseName}.pdf`, mimeType: 'application/pdf' },
+        media: { mimeType: 'application/pdf', body: Readable.from([pdfBuffer]) },
+        fields: 'id, webViewLink',
+      }),
+      drive.files.create({
+        requestBody: { name: `${baseName}.docx`, mimeType: DOCX_MIME },
+        media: { mimeType: DOCX_MIME, body: Readable.from([docxBuffer]) },
+        fields: 'id, webViewLink',
+      }),
+    ]);
 
-    // 3. Save the PDF as its own file in the user's Drive.
-    const pdf = await drive.files.create({
-      requestBody: {
-        name: `${baseName}.pdf`,
-        mimeType: 'application/pdf',
-      },
-      media: { mimeType: 'application/pdf', body: Readable.from([pdfBuffer]) },
-      fields: 'id, webViewLink',
-    });
     const pdfId = pdf.data.id;
-    if (!pdfId) throw new Error('Google Drive did not return a pdf id');
+    const docxId = docx.data.id;
+    if (!pdfId || !docxId) throw new Error('Google Drive did not return a file id');
+
     const pdfUrl = pdf.data.webViewLink ?? `https://drive.google.com/file/d/${pdfId}/view`;
+    const docUrl = docx.data.webViewLink ?? `https://drive.google.com/file/d/${docxId}/view`;
 
     return { docUrl, pdfUrl };
   }
