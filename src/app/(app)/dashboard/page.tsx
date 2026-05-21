@@ -266,7 +266,7 @@ function Stat({
             className={`mt-1 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full text-[10px] font-bold ${
               highlight
                 ? 'bg-white/25 text-white hover:bg-white/35'
-                : 'bg-surface-soft text-ink-soft hover:bg-line'
+                : 'bg-surface-muted text-ink-soft hover:bg-line'
             }`}
           >
             ?

@@ -9,17 +9,39 @@
  * Prompts live in /src/lib/services where context is clearer.
  */
 
-import type { JobPosting, UserProfile, TailoredResume } from '@/lib/types';
+import type { JobPosting, UserProfile, TailoredResume, PivotBrief } from '@/lib/types';
 
 export interface LLMProvider {
   /** Returns structured JSON; must NOT invent skills/facts. */
   parseResume(input: { textOrBase64: string; mime: string }): Promise<UserProfile>;
 
-  /** Tailors an existing resume for a target job. Allowed to reorder + emphasize, never invent. */
+  /**
+   * Tailors an existing resume for a target job. Allowed to reorder +
+   * emphasize, never invent. When pivotBrief is supplied the candidate
+   * is switching career tracks — reframe transferable experience toward
+   * the target role (still without fabricating).
+   */
   tailorResume(input: {
     profile: UserProfile;
     job: JobPosting;
+    pivotBrief?: PivotBrief;
   }): Promise<TailoredResume>;
+
+  /**
+   * Career-pivot step 1: given the user's free-text pivot goal, return
+   * exactly 2 short clarifying questions that sharpen the job search.
+   */
+  pivotClarify(input: { goal: string }): Promise<{ questions: string[] }>;
+
+  /**
+   * Career-pivot step 2: given the goal + the user's answers, synthesize
+   * a search brief — a human-readable summary, a short keyword query for
+   * the job APIs, and a best-fit role-family id (or null).
+   */
+  pivotSynthesize(input: {
+    goal: string;
+    qa: { question: string; answer: string }[];
+  }): Promise<{ refinedSummary: string; searchQuery: string; suggestedRoleFamily: string | null }>;
 
   /** Generates a personalized InMail. Tone must be warm, not salesy.
    *  If no referrer is provided, generates a cold outreach to a generic

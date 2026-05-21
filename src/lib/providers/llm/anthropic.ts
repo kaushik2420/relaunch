@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { serverConfig } from '@/lib/config';
 import type { LLMProvider } from './types';
-import type { JobPosting, UserProfile, TailoredResume } from '@/lib/types';
+import type { JobPosting, UserProfile, TailoredResume, PivotBrief } from '@/lib/types';
+import { ROLE_FAMILIES, ROLE_FAMILY_IDS } from '@/lib/role-families';
 
 /**
  * Anthropic implementation of LLMProvider.
@@ -73,7 +74,31 @@ Critical rules:
   // ----------------------------------------------------------------
   // tailorResume
   // ----------------------------------------------------------------
-  async tailorResume({ profile, job }: { profile: UserProfile; job: JobPosting }): Promise<TailoredResume> {
+  async tailorResume({
+    profile,
+    job,
+    pivotBrief,
+  }: {
+    profile: UserProfile;
+    job: JobPosting;
+    pivotBrief?: PivotBrief;
+  }): Promise<TailoredResume> {
+    // When the candidate is changing tracks, the resume must bridge
+    // their real history to the NEW target — emphasize transferable
+    // skills and reframe (never fabricate) accomplishments.
+    const pivotBlock = pivotBrief
+      ? `
+
+CAREER PIVOT — IMPORTANT:
+This candidate is intentionally switching career tracks. Their plan:
+"${pivotBrief.refinedSummary}"
+
+When tailoring:
+- Lead the summary with the pivot intent and the transferable strengths that support it.
+- Reframe past bullets to surface skills relevant to the target track (e.g. stakeholder management, analysis, leadership) — but do NOT invent titles, tools, or results they never had.
+- It is fine to de-emphasize track-specific jargon from the old role.`
+      : '';
+
     const prompt = `You are tailoring an existing resume for a target job.
 
 CANDIDATE PROFILE (canonical truth — never invent beyond this):
@@ -86,7 +111,7 @@ Description:
 ${job.description.slice(0, 4000)}
 
 Required JD keywords (lift these phrases when factually supported):
-${(job.keywords ?? []).join(', ')}
+${(job.keywords ?? []).join(', ')}${pivotBlock}
 
 Output STRICT JSON:
 {
@@ -111,6 +136,86 @@ Rules:
     });
 
     return extractJSON<TailoredResume>(message);
+  }
+
+  // ----------------------------------------------------------------
+  // pivotClarify — 2 sharp follow-up questions for a career pivot
+  // ----------------------------------------------------------------
+  async pivotClarify({ goal }: { goal: string }): Promise<{ questions: string[] }> {
+    const prompt = `A job seeker wants to PIVOT their career. Here's how they describe the change they want:
+
+"${goal}"
+
+Ask EXACTLY 2 short, specific follow-up questions that would most help us find the right jobs for them. Good questions probe things like: the exact target role/level, which of their existing strengths they want to lean on, industry preference, or any hard constraints. Keep each question under 20 words, friendly and plain.
+
+Output STRICT JSON: { "questions": [string, string] }`;
+
+    const message = await this.client.messages.create({
+      model: this.modelFast,
+      max_tokens: 400,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const out = extractJSON<{ questions: string[] }>(message);
+    return { questions: (out.questions ?? []).slice(0, 2) };
+  }
+
+  // ----------------------------------------------------------------
+  // pivotSynthesize — turn goal + answers into a concrete search brief
+  // ----------------------------------------------------------------
+  async pivotSynthesize({
+    goal,
+    qa,
+  }: {
+    goal: string;
+    qa: { question: string; answer: string }[];
+  }): Promise<{ refinedSummary: string; searchQuery: string; suggestedRoleFamily: string | null }> {
+    const familyList = ROLE_FAMILIES.map((r) => `${r.id} — ${r.label}`).join('\n');
+    const qaText = qa.map((x) => `Q: ${x.question}\nA: ${x.answer}`).join('\n\n');
+
+    const prompt = `A job seeker is pivoting careers. Synthesize a concrete job-search brief.
+
+THEIR GOAL:
+"${goal}"
+
+THEIR ANSWERS TO OUR QUESTIONS:
+${qaText}
+
+VALID ROLE FAMILIES (pick the single best-fit id, or null if truly none fit):
+${familyList}
+
+Output STRICT JSON:
+{
+  "refinedSummary": string,       // 2-3 warm, encouraging sentences describing the pivot plan, addressed to the user ("You're moving toward...")
+  "searchQuery": string,          // a SHORT keyword phrase (2-4 words, under 40 chars) to feed job-search APIs, e.g. "Product Manager"
+  "suggestedRoleFamily": string   // one id from the list above, or null
+}
+
+Rules:
+- searchQuery must be plain role keywords only — no seniority words, no company names.
+- suggestedRoleFamily MUST be one of the exact ids listed, or the JSON literal null.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 600,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const out = extractJSON<{
+      refinedSummary: string;
+      searchQuery: string;
+      suggestedRoleFamily: string | null;
+    }>(message);
+
+    // Validate the role family against our registry — never trust the model blindly.
+    const rf =
+      out.suggestedRoleFamily && ROLE_FAMILY_IDS.has(out.suggestedRoleFamily)
+        ? out.suggestedRoleFamily
+        : null;
+
+    return {
+      refinedSummary: (out.refinedSummary ?? '').trim(),
+      searchQuery: (out.searchQuery ?? '').trim().slice(0, 40),
+      suggestedRoleFamily: rf,
+    };
   }
 
   // ----------------------------------------------------------------

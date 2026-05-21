@@ -75,7 +75,17 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
             rel="noreferrer"
             className="btn-soft text-xs px-3 py-1.5"
           >
-            📄 Tailored resume
+            📄 Résumé (PDF)
+          </a>
+        )}
+        {m.tailoredResumeDocUrl && (
+          <a
+            href={m.tailoredResumeDocUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="btn-soft text-xs px-3 py-1.5"
+          >
+            ✏️ Edit in Docs
           </a>
         )}
         {m.applied && <span className="chip-accent">Applied</span>}

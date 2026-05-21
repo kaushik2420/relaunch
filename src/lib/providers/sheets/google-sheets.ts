@@ -1,7 +1,8 @@
 import { google, sheets_v4 } from 'googleapis';
 import { serverConfig } from '@/lib/config';
 import type { SheetsProvider, SheetMatchRow } from './types';
-import type { TailoredJobMatch, TailoredResume } from '@/lib/types';
+import type { TailoredJobMatch, UserProfile, TailoredResume } from '@/lib/types';
+import { renderResumeHtml } from '@/lib/resume/render-html';
 import { Readable } from 'node:stream';
 
 const HEADERS = [
@@ -13,13 +14,14 @@ const HEADERS = [
   'Mode',
   'Expected CTC',
   'Job Link',
-  'Tailored Resume',
+  'Resume (PDF)',    // column I — polished PDF link
   'Referrer(s)',
   'InMail',
   'Applied?',
   'Outcome',
   'Notes',
-  'Reaction', // column O — '👍 liked' / '👎 hidden' / ''
+  'Reaction',          // column O — '👍 liked' / '👎 hidden' / ''
+  'Resume (Editable)', // column P — editable Google Doc link
 ];
 
 export class GoogleSheetsProvider implements SheetsProvider {
@@ -109,6 +111,16 @@ export class GoogleSheetsProvider implements SheetsProvider {
     if (!matches.length) return;
     const sheets = this.sheetsClient(refreshToken);
 
+    // Re-write the header row every run. Cheap, idempotent, and it
+    // upgrades sheets created before a new column was added (e.g. the
+    // "Resume (Editable)" column P) without a separate migration.
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: 'Daily Matches!A1',
+      valueInputOption: 'RAW',
+      requestBody: { values: [HEADERS] },
+    });
+
     // Dedup: skip matches whose (company, role) already exists in the sheet.
     // Cheaper to do this in one read than relying on the user to clean up.
     const existing = await sheets.spreadsheets.values.get({
@@ -134,7 +146,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
       m.job.workMode,
       m.expectedCtc ?? '',
       m.job.url,
-      m.tailoredResumeUrl ?? '',
+      m.tailoredResumeUrl ?? '', // column I — PDF
       // Referrer column: prefer real names if available; otherwise the
       // LinkedIn-search deep link the user can click to find their own.
       m.referrers.length
@@ -145,6 +157,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
       '',
       '',
       '', // Reaction (column O) — starts blank
+      m.tailoredResumeDocUrl ?? '', // column P — editable Doc
     ]);
     await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -175,10 +188,10 @@ export class GoogleSheetsProvider implements SheetsProvider {
     const sheets = this.sheetsClient(refreshToken);
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      // Skip the header row (A1). Columns A:O — N was the original
-      // range, O is the new Reaction column. Sheets created before
-      // this change won't have column O populated; we default to '' below.
-      range: 'Daily Matches!A2:O',
+      // Skip the header row (A1). Columns A:P — O is Reaction, P is the
+      // editable-Doc link. Sheets created before a column was added just
+      // return short rows; we default missing cells to '' below.
+      range: 'Daily Matches!A2:P',
     });
     const rows = res.data.values ?? [];
 
@@ -206,6 +219,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
           outcome: (r[12] ?? '').toString(),
           notes: (r[13] ?? '').toString(),
           reaction: parseReaction((r[14] ?? '').toString()),
+          tailoredResumeDocUrl: (r[15] ?? '').toString(),
         };
       })
       .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
@@ -236,32 +250,54 @@ export class GoogleSheetsProvider implements SheetsProvider {
   }
 
   // ----------------------------------------------------------------
-  async createTailoredResumeDoc(input: {
+  async createTailoredResume(input: {
     refreshToken: string;
     company: string;
     role: string;
-    candidateName: string;
+    profile: UserProfile;
     tailored: TailoredResume;
-  }): Promise<string> {
+  }): Promise<{ docUrl: string; pdfUrl: string }> {
     const drive = google.drive({ version: 'v3', auth: this.auth(input.refreshToken) });
-    const body = renderResumeText(input);
+    const html = renderResumeHtml(input.profile, input.tailored);
+    const baseName = `Resume — ${input.company} · ${input.role}`;
 
-    // Upload as text/plain with target MIME = Google Doc — Drive converts on the fly.
-    const created = await drive.files.create({
+    // 1. Import the styled HTML straight into a formatted Google Doc.
+    //    Drive's HTML importer keeps headings, the two-column table,
+    //    colors and bullets — far richer than the old text/plain upload.
+    const doc = await drive.files.create({
       requestBody: {
-        name: `Tailored Resume — ${input.company} · ${input.role}`,
+        name: baseName,
         mimeType: 'application/vnd.google-apps.document',
       },
-      media: {
-        mimeType: 'text/plain',
-        body: Readable.from([body]),
-      },
+      media: { mimeType: 'text/html', body: Readable.from([html]) },
       fields: 'id',
     });
+    const docId = doc.data.id;
+    if (!docId) throw new Error('Google Drive did not return a doc id');
+    const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
 
-    const id = created.data.id;
-    if (!id) throw new Error('Google Drive did not return a doc id');
-    return `https://docs.google.com/document/d/${id}/edit`;
+    // 2. Export that same Doc to PDF — guarantees the PDF and Doc look
+    //    identical (no separate PDF renderer to keep in sync).
+    const exported = await drive.files.export(
+      { fileId: docId, mimeType: 'application/pdf' },
+      { responseType: 'arraybuffer' },
+    );
+    const pdfBuffer = Buffer.from(exported.data as ArrayBuffer);
+
+    // 3. Save the PDF as its own file in the user's Drive.
+    const pdf = await drive.files.create({
+      requestBody: {
+        name: `${baseName}.pdf`,
+        mimeType: 'application/pdf',
+      },
+      media: { mimeType: 'application/pdf', body: Readable.from([pdfBuffer]) },
+      fields: 'id, webViewLink',
+    });
+    const pdfId = pdf.data.id;
+    if (!pdfId) throw new Error('Google Drive did not return a pdf id');
+    const pdfUrl = pdf.data.webViewLink ?? `https://drive.google.com/file/d/${pdfId}/view`;
+
+    return { docUrl, pdfUrl };
   }
 
   // ----------------------------------------------------------------
@@ -338,43 +374,3 @@ function parseReaction(raw: string): '' | 'liked' | 'hidden' {
   return '';
 }
 
-/**
- * Render the tailored resume as plain text — Google Docs auto-formats
- * the upper-case lines and double newlines into headings and paragraphs.
- * We deliberately keep this readable as plain text too, so the user can
- * also copy-paste it into Word or LinkedIn.
- */
-function renderResumeText(input: {
-  company: string;
-  role: string;
-  candidateName: string;
-  tailored: TailoredResume;
-}): string {
-  const lines: string[] = [];
-  lines.push(input.candidateName.toUpperCase());
-  lines.push('');
-  lines.push('SUMMARY');
-  lines.push(input.tailored.summary);
-  lines.push('');
-  lines.push('CORE SKILLS');
-  lines.push(input.tailored.highlightedSkills.join(' · '));
-  lines.push('');
-  lines.push('EXPERIENCE');
-  for (const e of input.tailored.experienceBullets) {
-    lines.push('');
-    lines.push(`${e.title} — ${e.company}`);
-    for (const b of e.bullets) {
-      lines.push(`• ${b}`);
-    }
-  }
-  if (input.tailored.removedSections.length) {
-    lines.push('');
-    lines.push('---');
-    lines.push(`Sections removed for this version: ${input.tailored.removedSections.join(', ')}`);
-  }
-  if (input.tailored.rationale) {
-    lines.push('');
-    lines.push(`(Tailoring rationale: ${input.tailored.rationale})`);
-  }
-  return lines.join('\n');
-}

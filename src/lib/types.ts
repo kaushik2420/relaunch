@@ -72,12 +72,31 @@ export interface Referrer {
   sharedContext?: string; // "worked at TechFlow 2021-23"
 }
 
+/**
+ * The refined career-pivot plan, built on the preferences page and
+ * stored in users.pivot_brief. Drives job search + resume tailoring
+ * when pivot_enabled is true.
+ */
+export interface PivotBrief {
+  /** The user's raw description of the pivot they want. */
+  goal: string;
+  /** The 2 clarifying questions Claude asked + the user's answers. */
+  qa: { question: string; answer: string }[];
+  /** Human-readable summary of the agreed pivot plan (shown back to user). */
+  refinedSummary: string;
+  /** Short keyword phrase fed to the job-search APIs. */
+  searchQuery: string;
+  /** A role-family id (see role-families.ts), or null if none fits. */
+  suggestedRoleFamily: string | null;
+}
+
 export interface TailoredJobMatch {
   job: JobPosting;
   matchPercent: number;
   reasons: string[];
   tailored: TailoredResume;
-  tailoredResumeUrl?: string;   // URL to PDF in user's Drive
+  tailoredResumeUrl?: string;     // URL to the polished PDF in user's Drive
+  tailoredResumeDocUrl?: string;  // URL to the editable Google Doc version
   referrers: Referrer[];        // legacy — populated only if a LinkedIn data API is wired
   /** Pre-built LinkedIn people-search URL — opens 2nd-degree connections at the target company. Free alternative to Proxycurl/Apollo. */
   connectionsSearchUrl?: string;

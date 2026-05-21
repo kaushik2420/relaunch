@@ -6,7 +6,7 @@ import { llm } from '@/lib/providers/llm';
 import { sheets } from '@/lib/providers/sheets';
 import { email as emailProvider } from '@/lib/providers/email';
 import { findReferrers, buildConnectionsSearchUrl } from './referrer-finder';
-import type { TailoredJobMatch, UserProfile, UserPreferences } from '@/lib/types';
+import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief } from '@/lib/types';
 
 /**
  * Process a single user's daily run.
@@ -26,16 +26,22 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     timezone: userRow.timezone ?? 'Asia/Kolkata',
   };
 
+  // Career-pivot: if the user turned on pivot mode and we have a
+  // synthesized brief, the search is driven by the brief — not their
+  // resume history. role_family was already set to the pivot target
+  // when preferences were saved.
+  const pivotBrief = parsePivotBrief(userRow);
+
   // 1. Pull jobs across all enabled providers.
   //
   // Query strategy: the job APIs (Adzuna, Jooble, JSearch) want SHORT
   // keyword phrases like "Product Manager", not full headlines like
   // "Senior Product Manager with 7 years in fintech driving 0->1 launches".
-  // We derive a clean role title from the most recent experience entry,
-  // strip seniority words (the API filters those separately if at all),
-  // and cap to ~40 chars. Falls back to a sensible default if needed.
-  const query = deriveJobQuery(profile);
-  console.log(`[daily-runner] query="${query}" roleFamily=${userRow.role_family ?? '(none)'} locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
+  // For pivot users we use the brief's searchQuery; otherwise we derive
+  // a clean role title from the most recent experience entry, strip
+  // seniority words, and cap to ~40 chars.
+  const query = pivotBrief?.searchQuery?.trim() || deriveJobQuery(profile);
+  console.log(`[daily-runner] query="${query}" pivot=${pivotBrief ? 'on' : 'off'} roleFamily=${userRow.role_family ?? '(none)'} locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
   const jobs = await fetchJobsFromAll({
     query,
     locations: prefs.locations.length ? prefs.locations : ['India'],
@@ -68,21 +74,29 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // the whole match. Better to ship a partial row than nothing.
   const matches: TailoredJobMatch[] = await Promise.all(
     top.map(async ({ job, matchPercent, reasons }) => {
-      const tailored = await llm().tailorResume({ profile, job });
+      const tailored = await llm().tailorResume({
+        profile,
+        job,
+        pivotBrief: pivotBrief ?? undefined,
+      });
 
-      // (b) Save tailored resume as Google Doc
+      // (b) Save tailored resume to Drive — both an editable Doc and a
+      //     polished PDF (PDF is exported from that Doc so they match).
       let tailoredResumeUrl: string | undefined;
+      let tailoredResumeDocUrl: string | undefined;
       if (refreshToken) {
         try {
-          tailoredResumeUrl = await sheets().createTailoredResumeDoc({
+          const r = await sheets().createTailoredResume({
             refreshToken,
             company: job.company,
             role: job.title,
-            candidateName: profile.fullName,
+            profile,
             tailored,
           });
+          tailoredResumeUrl = r.pdfUrl;
+          tailoredResumeDocUrl = r.docUrl;
         } catch (err) {
-          console.error('createTailoredResumeDoc failed', err);
+          console.error('createTailoredResume failed', err);
         }
       }
 
@@ -116,7 +130,7 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
         console.error('draftInmail failed', err);
       }
 
-      return { job, matchPercent, reasons, tailored, tailoredResumeUrl, referrers, connectionsSearchUrl, inmailDraft };
+      return { job, matchPercent, reasons, tailored, tailoredResumeUrl, tailoredResumeDocUrl, referrers, connectionsSearchUrl, inmailDraft };
     })
   );
 
@@ -171,6 +185,21 @@ function deriveJobQuery(profile: UserProfile): string {
   return q || 'engineer';
 }
 
+/**
+ * Returns the user's pivot brief only if pivot mode is on AND the brief
+ * is usable (has a search query). pivot_brief comes back from Supabase
+ * as already-parsed jsonb. Returns null otherwise so callers fall back
+ * to the normal resume-derived behaviour.
+ */
+function parsePivotBrief(userRow: UserRow): PivotBrief | null {
+  if (!userRow.pivot_enabled || !userRow.pivot_brief) return null;
+  const b = userRow.pivot_brief as Partial<PivotBrief> | null;
+  if (b && typeof b.searchQuery === 'string' && b.searchQuery.trim()) {
+    return b as PivotBrief;
+  }
+  return null;
+}
+
 function renderDigestHtml(name: string, matches: TailoredJobMatch[]): string {
   const items = matches
     .map(
@@ -209,7 +238,7 @@ export async function pickUsersForThisHour(now = new Date()) {
   const { data, error } = await supabaseAdmin()
     .from('users')
     .select(
-      'id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family'
+      'id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family, pivot_enabled, pivot_brief'
     )
     .eq('is_active', true)
     .neq('email_frequency', 'paused');
@@ -267,4 +296,6 @@ export interface UserRow {
   free_until: string;
   is_paying: boolean | null;
   role_family?: string | null;
+  pivot_enabled?: boolean | null;
+  pivot_brief?: unknown;
 }

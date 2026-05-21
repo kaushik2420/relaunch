@@ -47,7 +47,7 @@ export async function POST(_req: NextRequest) {
   const { data: row, error } = await admin
     .from("users")
     .select(
-      "id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family",
+      "id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family, pivot_enabled, pivot_brief",
     )
     .eq("id", user.id)
     .single();

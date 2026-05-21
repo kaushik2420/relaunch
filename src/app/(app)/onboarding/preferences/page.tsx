@@ -3,8 +3,10 @@ import { createSupabaseServer } from '@/lib/supabase/server';
 import { savePreferencesAction } from '../actions';
 import { Stepper } from '@/components/Stepper';
 import { LocationPicker } from './LocationPicker';
+import { PivotPanel } from './PivotPanel';
 import { detectSelectedIds } from '@/lib/locations';
 import { roleFamiliesByGroup } from '@/lib/role-families';
+import type { PivotBrief } from '@/lib/types';
 
 export default async function PreferencesPage() {
   const sb = createSupabaseServer();
@@ -12,7 +14,7 @@ export default async function PreferencesPage() {
   if (!user) redirect('/login');
   const { data: row } = await sb
     .from('users')
-    .select('locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, role_family')
+    .select('locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, role_family, pivot_enabled, pivot_brief')
     .eq('id', user.id)
     .single();
 
@@ -20,6 +22,8 @@ export default async function PreferencesPage() {
   const initialSelectedIds = detectSelectedIds(row?.locations ?? []);
   const modes = row?.work_modes ?? ['remote', 'hybrid'];
   const currentRoleFamily = (row?.role_family as string | null) ?? '';
+  const pivotEnabled = (row?.pivot_enabled as boolean | null) ?? false;
+  const pivotBrief = (row?.pivot_brief as PivotBrief | null) ?? null;
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
@@ -48,8 +52,11 @@ export default async function PreferencesPage() {
             </select>
             <p className="mt-1 text-xs text-ink-mute">
               We use this to scope each job source to the right category — big recall boost.
+              Changing careers? Use the pivot option below and we'll point the search there instead.
             </p>
           </div>
+
+          <PivotPanel initialEnabled={pivotEnabled} initialBrief={pivotBrief} />
 
           <LocationPicker initialSelectedIds={initialSelectedIds} />
 

@@ -12,7 +12,7 @@ export function JobTable({ matches }: { matches: SheetMatchRow[] }) {
   return (
     <div className="card overflow-x-auto p-0">
       <table className="w-full text-sm">
-        <thead className="bg-surface-soft text-left">
+        <thead className="bg-surface-muted text-left">
           <tr className="text-xs uppercase tracking-wider text-ink-soft">
             <th className="px-3 py-2 font-semibold">Role</th>
             <th className="px-3 py-2 font-semibold">Company</th>
@@ -45,10 +45,10 @@ function JobRow({ m }: { m: SheetMatchRow }) {
       ? 'bg-brand-50 text-brand-700'
       : m.matchPercent >= 60
       ? 'bg-accent-50 text-accent-600'
-      : 'bg-surface-soft text-ink-soft';
+      : 'bg-surface-muted text-ink-soft';
 
   return (
-    <tr className="border-t border-line hover:bg-surface-soft/50">
+    <tr className="border-t border-line hover:bg-surface-muted/50">
       <td className="px-3 py-2.5 font-medium">
         {m.jobUrl ? (
           <a href={m.jobUrl} target="_blank" rel="noreferrer" className="hover:underline">
@@ -83,9 +83,20 @@ function JobRow({ m }: { m: SheetMatchRow }) {
               target="_blank"
               rel="noreferrer"
               className="text-xs text-brand-700 hover:underline whitespace-nowrap"
-              title="Tailored resume"
+              title="Résumé (PDF)"
             >
               📄
+            </a>
+          )}
+          {m.tailoredResumeDocUrl && (
+            <a
+              href={m.tailoredResumeDocUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-brand-700 hover:underline whitespace-nowrap"
+              title="Edit résumé in Google Docs"
+            >
+              ✏️
             </a>
           )}
           <ReactionButtons

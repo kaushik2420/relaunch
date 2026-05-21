@@ -1,4 +1,4 @@
-import type { TailoredJobMatch, TailoredResume } from '@/lib/types';
+import type { TailoredJobMatch, TailoredResume, UserProfile } from '@/lib/types';
 
 /**
  * One row out of the user's "Daily Matches" tab. Same shape as the
@@ -14,7 +14,10 @@ export interface SheetMatchRow {
   mode: string;
   expectedCtc: string;
   jobUrl: string;
+  /** Link to the polished PDF resume in the user's Drive. */
   tailoredResumeUrl: string;
+  /** Link to the editable Google Doc version of the resume. */
+  tailoredResumeDocUrl: string;
   referrers: string;
   inmailSubject: string;
   applied: boolean;
@@ -38,17 +41,18 @@ export interface SheetsProvider {
   readMatches(spreadsheetId: string, refreshToken: string, limit?: number): Promise<SheetMatchRow[]>;
 
   /**
-   * Create a Google Doc in the user's Drive with the tailored-resume content.
-   * Returns the doc URL (https://docs.google.com/document/d/.../edit).
-   * Uses the same OAuth refresh token; doc is created in their root Drive.
+   * Create the tailored resume in the user's Drive — BOTH formats:
+   *   - an editable, formatted Google Doc
+   *   - a polished PDF (exported from that same Doc, so they match)
+   * Returns both links. Uses the same OAuth refresh token.
    */
-  createTailoredResumeDoc(input: {
+  createTailoredResume(input: {
     refreshToken: string;
     company: string;
     role: string;
-    candidateName: string;
+    profile: UserProfile;
     tailored: TailoredResume;
-  }): Promise<string>;
+  }): Promise<{ docUrl: string; pdfUrl: string }>;
 
   /**
    * Set the user's reaction (👍 liked / 👎 hidden) on a specific match.

@@ -4,6 +4,7 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { expandToMatchTerms } from "@/lib/locations";
 import { ROLE_FAMILY_IDS } from "@/lib/role-families";
+import type { PivotBrief } from "@/lib/types";
 
 export async function saveProfileAction(formData: FormData) {
   const sb = createSupabaseServer();
@@ -78,6 +79,31 @@ export async function savePreferencesAction(formData: FormData) {
   const roleFamilyRaw = String(formData.get("roleFamily") ?? "").trim();
   const roleFamily = ROLE_FAMILY_IDS.has(roleFamilyRaw) ? roleFamilyRaw : null;
 
+  // Career-pivot fields (from PivotPanel). pivot_brief is a JSON blob;
+  // parse defensively — a malformed brief shouldn't break saving prefs.
+  const pivotEnabled = String(formData.get("pivotEnabled") ?? "") === "true";
+  let pivotBrief: PivotBrief | null = null;
+  const pivotBriefRaw = String(formData.get("pivotBrief") ?? "").trim();
+  if (pivotEnabled && pivotBriefRaw) {
+    try {
+      const parsed = JSON.parse(pivotBriefRaw) as PivotBrief;
+      if (parsed && typeof parsed.searchQuery === "string") {
+        pivotBrief = parsed;
+      }
+    } catch {
+      /* malformed brief — pivot stays on but unrefined; runner falls back */
+    }
+  }
+
+  // When pivoting with a synthesized role family, that wins over the
+  // dropdown — the whole point of pivot mode is to search elsewhere.
+  const effectiveRoleFamily =
+    pivotEnabled &&
+    pivotBrief?.suggestedRoleFamily &&
+    ROLE_FAMILY_IDS.has(pivotBrief.suggestedRoleFamily)
+      ? pivotBrief.suggestedRoleFamily
+      : roleFamily;
+
   await sb
     .from("users")
     .update({
@@ -89,7 +115,9 @@ export async function savePreferencesAction(formData: FormData) {
       timezone,
       email_frequency: emailFrequency,
       notes: String(formData.get("notes") ?? "") || null,
-      role_family: roleFamily,
+      role_family: effectiveRoleFamily,
+      pivot_enabled: pivotEnabled,
+      pivot_brief: pivotBrief,
     })
     .eq("id", user.id);
 
@@ -102,6 +130,7 @@ export async function savePreferencesAction(formData: FormData) {
       work_modes: workModes,
       email_frequency: emailFrequency,
       timezone,
+      pivot_enabled: pivotEnabled,
     },
   });
   await posthog.shutdown();
