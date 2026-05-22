@@ -37,7 +37,31 @@ export default function Landing() {
     <main className="min-h-screen bg-surface">
       {/* nav */}
       <nav className="flex items-center justify-between border-b border-line px-6 py-3.5 md:px-10">
-        <Logo />
+        <div className="flex items-center gap-2.5">
+          <Logo />
+          <a
+            href="https://www.linkedin.com/groups/22280015/"
+            target="_blank"
+            rel="noreferrer"
+            title="Join the Comeback Circle — our LinkedIn group to share issues & feedback"
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent-500 px-3 py-1.5 text-xs font-bold text-ink transition-colors hover:bg-accent-600"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z" />
+            </svg>
+            Comeback Circle
+          </a>
+        </div>
         <Link href="/login" className="text-sm text-ink-soft hover:text-ink">
           Sign in
         </Link>
