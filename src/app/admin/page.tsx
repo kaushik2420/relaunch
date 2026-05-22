@@ -4,6 +4,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { serverConfig } from "@/lib/config";
 import { Logo } from "@/components/Logo";
 import { approveAndInviteAction } from "./actions";
+import {
+  estimateMonthlyCost,
+  type CostEstimate,
+} from "@/lib/services/cost-estimate";
 
 export const dynamic = "force-dynamic";
 
@@ -57,15 +61,50 @@ export default async function AdminPage({
 
   const count = (s: string) => rows.filter((r) => r.status === s).length;
 
+  // ---- Cost & usage: aggregate the last 30 days of activity ----
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const { data: runData } = await supabaseAdmin()
+    .from("job_runs")
+    .select("jobs_emailed, run_at")
+    .gte("run_at", since);
+  const runRows = (runData ?? []) as { jobs_emailed: number | null }[];
+  const tailoredMatches = runRows.reduce(
+    (s, r) => s + (Number(r.jobs_emailed) || 0),
+    0,
+  );
+  const emails = runRows.filter((r) => (Number(r.jobs_emailed) || 0) > 0).length;
+
+  const { count: activeUsers } = await supabaseAdmin()
+    .from("users")
+    .select("id", { count: "exact", head: true })
+    .eq("is_active", true);
+  const { count: newUsers } = await supabaseAdmin()
+    .from("users")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", since);
+
+  const usage = {
+    activeUsers: activeUsers ?? 0,
+    runs: runRows.length,
+    tailoredMatches,
+    emails,
+    newUsers: newUsers ?? 0,
+  };
+  const cost = estimateMonthlyCost(usage);
+
   return (
     <main className="min-h-screen bg-surface-page">
       <nav className="flex items-center justify-between border-b border-line bg-surface px-6 py-3.5">
         <Logo />
-        <span className="text-sm text-ink-soft">Admin · Waitlist</span>
+        <span className="text-sm text-ink-soft">Admin</span>
       </nav>
 
       <div className="mx-auto max-w-5xl px-6 py-10">
-        <h1 className="text-2xl font-bold">Early-access waitlist</h1>
+        <h1 className="text-2xl font-bold">Relaunch admin</h1>
+
+        <CostPanel cost={cost} usage={usage} />
+
+        <h2 className="mt-12 text-xl font-bold">Early-access waitlist</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Review each applicant&apos;s LinkedIn, then approve to email them a
           private, single-use invite link.
@@ -203,6 +242,136 @@ export default async function AdminPage({
         )}
       </div>
     </main>
+  );
+}
+
+function usd(n: number): string {
+  return "$" + (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function CostPanel({
+  cost,
+  usage,
+}: {
+  cost: CostEstimate;
+  usage: {
+    activeUsers: number;
+    runs: number;
+    tailoredMatches: number;
+    emails: number;
+    newUsers: number;
+  };
+}) {
+  return (
+    <div className="mt-6 rounded-xl border border-line bg-surface p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-xl font-bold">Cost &amp; usage</h2>
+        <span className="text-xs text-ink-mute">Estimate · last 30 days</span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <BigStat label="Est. monthly burn" value={usd(cost.monthlyBurn)} tone="ink" />
+        <BigStat
+          label="Projected at 40 users"
+          value={usd(cost.projectedAt40)}
+          tone="brand"
+        />
+        <BigStat
+          label="Per active user / month"
+          value={usd(cost.perActiveUser)}
+          tone="ink"
+        />
+      </div>
+
+      <div className="mt-4 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+        <CostLine label="Claude — resume, cover letter, InMail" value={usd(cost.llmCost)} />
+        <CostLine label="Resume parsing — new sign-ups" value={usd(cost.parseCost)} />
+        <CostLine label="Email — Resend digests" value={usd(cost.emailCost)} />
+        <CostLine label="Fixed monthly — infra + job APIs" value={usd(cost.fixedMonthly)} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-soft">
+        <span><strong className="text-ink">{usage.activeUsers}</strong> active users</span>
+        <span><strong className="text-ink">{usage.runs}</strong> daily runs</span>
+        <span><strong className="text-ink">{usage.tailoredMatches}</strong> tailored matches</span>
+        <span><strong className="text-ink">{usage.emails}</strong> digest emails</span>
+        <span><strong className="text-ink">{usage.newUsers}</strong> new sign-ups</span>
+      </div>
+
+      <p className="mt-4 text-xs text-ink-mute">
+        Estimate only — tune the per-unit rates in{" "}
+        <code className="rounded bg-surface-page px-1">
+          src/lib/services/cost-estimate.ts
+        </code>
+        . Authoritative numbers live in each provider&apos;s console:
+      </p>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <a
+          href="https://console.anthropic.com/settings/usage"
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-700 hover:underline"
+        >
+          Anthropic usage ↗
+        </a>
+        <a
+          href="https://resend.com/overview"
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-700 hover:underline"
+        >
+          Resend ↗
+        </a>
+        <a
+          href="https://supabase.com/dashboard/project/_/settings/billing"
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-700 hover:underline"
+        >
+          Supabase billing ↗
+        </a>
+        <a
+          href="https://vercel.com/dashboard/usage"
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-700 hover:underline"
+        >
+          Vercel usage ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function BigStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "ink" | "brand";
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-surface-page px-4 py-3">
+      <div
+        className={`text-2xl font-bold ${
+          tone === "brand" ? "text-brand-700" : "text-ink"
+        }`}
+      >
+        {value}
+      </div>
+      <div className="mt-0.5 text-xs text-ink-soft">{label}</div>
+    </div>
+  );
+}
+
+function CostLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between border-b border-line py-1.5">
+      <span className="text-ink-soft">{label}</span>
+      <span className="font-semibold text-ink">{value}</span>
+    </div>
   );
 }
 
