@@ -150,7 +150,12 @@ export default function Landing() {
             We never store your resume or job data — everything lives in your
             own Google Sheet.
           </p>
-          <p>© {new Date().getFullYear()} Relaunch</p>
+          <div className="flex items-center gap-4">
+            <Link href="/feedback" className="hover:text-ink">
+              Feedback
+            </Link>
+            <span>© {new Date().getFullYear()} Relaunch</span>
+          </div>
         </div>
       </footer>
     </main>

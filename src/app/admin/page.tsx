@@ -17,6 +17,15 @@ type Row = {
   invited_at: string | null;
 };
 
+type FeedbackRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  rating: number | null;
+  message: string;
+  created_at: string;
+};
+
 export default async function AdminPage({
   searchParams,
 }: {
@@ -39,6 +48,12 @@ export default async function AdminPage({
     .select("id, email, first_name, linkedin_url, status, created_at, invited_at")
     .order("created_at", { ascending: false });
   const rows = (data ?? []) as Row[];
+
+  const { data: fbData } = await supabaseAdmin()
+    .from("feedback")
+    .select("id, name, email, rating, message, created_at")
+    .order("created_at", { ascending: false });
+  const feedback = (fbData ?? []) as FeedbackRow[];
 
   const count = (s: string) => rows.filter((r) => r.status === s).length;
 
@@ -142,6 +157,50 @@ export default async function AdminPage({
             </tbody>
           </table>
         </div>
+
+        {/* ---- Feedback ---- */}
+        <div className="mt-12 flex items-baseline gap-3">
+          <h2 className="text-xl font-bold">Feedback</h2>
+          <span className="text-sm text-ink-soft">{feedback.length} total</span>
+        </div>
+        <p className="mt-1 text-sm text-ink-soft">
+          What people are telling us — newest first.
+        </p>
+
+        {feedback.length === 0 ? (
+          <p className="mt-4 rounded-lg border border-line bg-surface p-4 text-sm text-ink-soft">
+            No feedback yet.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {feedback.map((f) => (
+              <div
+                key={f.id}
+                className="rounded-xl border border-line bg-surface p-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold">
+                    {f.name || f.email || "Anonymous"}
+                  </span>
+                  <span className="flex items-center gap-2 text-xs text-ink-mute">
+                    {f.rating ? (
+                      <span className="rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">
+                        {f.rating}/5
+                      </span>
+                    ) : null}
+                    {fmtDate(f.created_at)}
+                  </span>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-sm text-ink">
+                  {f.message}
+                </p>
+                {f.email && (
+                  <p className="mt-2 text-xs text-ink-mute">{f.email}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );

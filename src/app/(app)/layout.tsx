@@ -75,6 +75,9 @@ export default async function AppLayout({
           <Link href="/upskill" className="hover:text-ink">
             Upskill
           </Link>
+          <Link href="/feedback" className="hover:text-ink">
+            Feedback
+          </Link>
           <Link href="/settings" className="hover:text-ink">
             Settings
           </Link>
