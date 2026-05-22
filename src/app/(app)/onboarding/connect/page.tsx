@@ -79,8 +79,9 @@ export default async function ConnectPage({
 
         <div className="mt-5">
           <EmpathyBanner icon="🔒" title="The least permission possible.">
-            We ask for <code>drive.file</code> (only files we create) and optionally{' '}
-            <code>gmail.send</code> for sending your daily digest from your own address.
+            We ask only for <code>drive.file</code> — access limited to the single
+            Job Tracker sheet Relaunch creates for you. We can't see anything else in
+            your Drive, and your daily digest is emailed to you separately.
           </EmpathyBanner>
         </div>
 

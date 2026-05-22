@@ -52,17 +52,52 @@ export async function signUpAction(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const firstName = String(formData.get("firstName") ?? "").trim();
   const affected = formData.get("affectedByLayoff") === "true";
+  const inviteToken = String(formData.get("invite") ?? "").trim();
+  const back = `/signup?invite=${encodeURIComponent(inviteToken)}&error=`;
 
   if (!email || !password || !firstName) {
+    redirect(back + encodeURIComponent("Please fill in all fields"));
+  }
+
+  // ---- Invite gate: signup is allowed only with a valid, unused token.
+  const admin = supabaseAdmin();
+  const { data: invite } = await admin
+    .from("invites")
+    .select("id, email, used_at, expires_at")
+    .eq("token", inviteToken)
+    .maybeSingle();
+
+  if (!invite || invite.used_at) {
     redirect(
-      "/signup?error=" + encodeURIComponent("Please fill in all fields"),
+      "/signup?error=" +
+        encodeURIComponent(
+          "This invite link is invalid or has already been used.",
+        ),
+    );
+  }
+  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+    redirect(
+      "/signup?error=" + encodeURIComponent("This invite link has expired."),
+    );
+  }
+  if (invite.email.trim().toLowerCase() !== email) {
+    redirect(
+      back +
+        encodeURIComponent(
+          "Please sign up with the email your invite was sent to.",
+        ),
     );
   }
 
   // Cohort check BEFORE we create an auth user, to avoid orphan rows.
   const capacity = await evaluateCohortCapacity();
   if (capacity.state === "waitlist") {
-    redirect("/signup"); // page re-renders waitlist UI
+    redirect(
+      back +
+        encodeURIComponent(
+          "We're briefly at capacity — please try again shortly.",
+        ),
+    );
   }
 
   const sb = createSupabaseServer();
@@ -74,15 +109,12 @@ export async function signUpAction(formData: FormData) {
       data: { first_name: firstName },
     },
   });
-  if (error) redirect(`/signup?error=${encodeURIComponent(error.message)}`);
+  if (error) redirect(back + encodeURIComponent(error.message));
   if (!data.user)
-    redirect(
-      "/signup?error=" + encodeURIComponent("Unknown error creating account"),
-    );
+    redirect(back + encodeURIComponent("Unknown error creating account"));
 
   // Create the public.users row (the trigger assigns signup_position + cohort + free_until).
   // We use the admin client so RLS doesn't trip the insert before the user's session is set.
-  const admin = supabaseAdmin();
   const { error: insertErr } = await admin.from("users").insert({
     id: data.user.id,
     email,
@@ -90,8 +122,14 @@ export async function signUpAction(formData: FormData) {
     affected_by_layoff: affected,
     declared_at: new Date().toISOString(),
   });
-  if (insertErr)
-    redirect(`/signup?error=${encodeURIComponent(insertErr.message)}`);
+  if (insertErr) redirect(back + encodeURIComponent(insertErr.message));
+
+  // Burn the single-use invite and mark the waitlist row as joined.
+  await admin
+    .from("invites")
+    .update({ used_at: new Date().toISOString(), used_by: data.user.id })
+    .eq("id", invite.id);
+  await admin.from("waitlist").update({ status: "joined" }).eq("email", email);
 
   const posthog = getPostHogClient();
   posthog.capture({
@@ -151,8 +189,18 @@ export async function joinWaitlistAction(formData: FormData) {
     .trim()
     .toLowerCase();
   const firstName = String(formData.get("firstName") ?? "").trim();
-  const reason = String(formData.get("reason") ?? "").trim();
+  const linkedin = String(formData.get("linkedin") ?? "").trim();
+  if (!email) return;
+  // Upsert so a repeat submission doesn't error on the unique email,
+  // and never downgrades the status of someone we've already invited.
   await supabaseAdmin()
     .from("waitlist")
-    .insert({ email, first_name: firstName, reason });
+    .upsert(
+      {
+        email,
+        first_name: firstName || null,
+        linkedin_url: linkedin || null,
+      },
+      { onConflict: "email", ignoreDuplicates: true },
+    );
 }

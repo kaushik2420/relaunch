@@ -6,8 +6,13 @@ import { signOAuthState } from '@/lib/oauth-state';
 
 /**
  * Start Google OAuth — scope-minimal:
- *   drive.file  → only the sheets we create
- *   gmail.send  → only send (no read)
+ *   drive.file      → only the sheets we create (per-file Drive access)
+ *   userinfo.email  → confirm which Google account was connected
+ *
+ * We deliberately do NOT request gmail.send: the daily digest is sent
+ * via Resend, so staying on drive.file (a non-restricted scope) lets the
+ * app pass Google verification without a restricted-scope security
+ * assessment.
  */
 export async function GET(_req: NextRequest) {
   const sb = createSupabaseServer();
@@ -25,7 +30,6 @@ export async function GET(_req: NextRequest) {
     prompt: 'consent',               // force refresh_token issuance
     scope: [
       'https://www.googleapis.com/auth/drive.file',
-      'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
     // Signed HMAC state — lets the callback identify the user without

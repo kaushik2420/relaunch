@@ -59,12 +59,15 @@ const serverSchema = z.object({
   // Email
   EMAIL_PROVIDER: z.enum(['resend', 'gmail']).default('resend'),
   RESEND_API_KEY: z.string().optional(),
-  FROM_EMAIL: z.string().email().default('hello@relaunch.app'),
+  FROM_EMAIL: z.string().email().default('hello@get-relaunch.com'),
 
   // Optional
   PROXYCURL_API_KEY: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
   CRON_SECRET: z.string().min(16),
+
+  // Admin — who can access /admin to review the waitlist + mint invites
+  ADMIN_EMAIL: z.string().email().default('kaushikn2416@gmail.com'),
 });
 
 const publicSchema = z.object({
