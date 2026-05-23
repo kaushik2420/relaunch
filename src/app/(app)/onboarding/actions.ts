@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { expandToMatchTerms } from "@/lib/locations";
 import { ROLE_FAMILY_IDS } from "@/lib/role-families";
@@ -41,7 +42,12 @@ export async function saveProfileAction(formData: FormData) {
     },
   };
 
-  const { error: profileErr } = await sb
+  // Write with the service-role client (RLS bypassed). The RLS-enforced
+  // server client's writes silently match zero rows inside a Server Action,
+  // so the save looked successful but never persisted. We've already
+  // authenticated the user above and scope the write to their own row, so
+  // this is safe — it mirrors how signUpAction writes the users table.
+  const { error: profileErr } = await supabaseAdmin()
     .from("users")
     .update({ profile: merged })
     .eq("id", user.id);
@@ -116,7 +122,9 @@ export async function savePreferencesAction(formData: FormData) {
       ? pivotBrief.suggestedRoleFamily
       : roleFamily;
 
-  const { data: updatedRows, error: updateErr } = await sb
+  // Service-role write — see the note in saveProfileAction. The RLS client
+  // silently updates zero rows here, which is why preferences never saved.
+  const { data: updatedRows, error: updateErr } = await supabaseAdmin()
     .from("users")
     .update({
       locations,
