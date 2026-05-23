@@ -76,13 +76,21 @@ export default async function PreferencesPage({
               {(['remote', 'hybrid', 'onsite', 'any'] as const).map((m) => (
                 <label
                   key={m}
-                  className="cursor-pointer rounded-full border border-line bg-surface px-4 py-2 text-sm has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 has-[:checked]:font-semibold has-[:checked]:text-brand-700"
+                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-4 py-2 text-sm"
                 >
-                  <input type="checkbox" name="workModes" value={m} defaultChecked={modes.includes(m)} className="hidden" />
-                  {m === 'remote' && '🌐 Remote'}
-                  {m === 'hybrid' && '🏢 Hybrid'}
-                  {m === 'onsite' && '🪑 On-site'}
-                  {m === 'any' && '✨ No preference'}
+                  <input
+                    type="checkbox"
+                    name="workModes"
+                    value={m}
+                    defaultChecked={modes.includes(m)}
+                    className="h-4 w-4 accent-brand-500"
+                  />
+                  <span>
+                    {m === 'remote' && '🌐 Remote'}
+                    {m === 'hybrid' && '🏢 Hybrid'}
+                    {m === 'onsite' && '🪑 On-site'}
+                    {m === 'any' && '✨ No preference'}
+                  </span>
                 </label>
               ))}
             </div>

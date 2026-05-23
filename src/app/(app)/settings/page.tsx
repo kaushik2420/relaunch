@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: { saved?: string; diag?: string };
+  searchParams: { saved?: string };
 }) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
@@ -28,16 +28,6 @@ export default async function SettingsPage({
         <p className="rounded-lg border border-success/30 bg-success-soft p-3 text-sm">
           ✅ Your preferences were saved.
         </p>
-      )}
-      {searchParams.diag && (
-        <div className="rounded-lg border border-line bg-surface p-3 text-xs">
-          <p className="font-semibold text-ink-soft">
-            Diagnostic — what the server received on save (send this to support):
-          </p>
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-ink">
-            {decodeURIComponent(searchParams.diag)}
-          </pre>
-        </div>
       )}
       <div className="card">
         <h2 className="text-xl font-bold">Your resume &amp; profile</h2>

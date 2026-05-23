@@ -113,12 +113,26 @@ export function expandToMatchTerms(selectedIds: string[]): string[] {
  */
 export function detectSelectedIds(savedLocations: string[]): string[] {
   if (!savedLocations.length) return [];
-  const lower = savedLocations.map((l) => l.toLowerCase());
+  const saved = new Set(savedLocations.map((l) => l.toLowerCase()));
+
+  // Some terms ("Remote", "Anywhere") are shared by several options, so a
+  // bare match lights up all of them. Match each option only on the terms
+  // that are UNIQUE to it; fall back to all terms if it has none unique.
+  const termCount = new Map<string, number>();
+  for (const opt of LOCATION_OPTIONS) {
+    for (const t of opt.matchTerms) {
+      const k = t.toLowerCase();
+      termCount.set(k, (termCount.get(k) ?? 0) + 1);
+    }
+  }
+
   const ids: string[] = [];
   for (const opt of LOCATION_OPTIONS) {
-    if (opt.matchTerms.some((t) => lower.includes(t.toLowerCase()))) {
-      ids.push(opt.id);
-    }
+    const unique = opt.matchTerms.filter(
+      (t) => termCount.get(t.toLowerCase()) === 1,
+    );
+    const terms = unique.length ? unique : opt.matchTerms;
+    if (terms.some((t) => saved.has(t.toLowerCase()))) ids.push(opt.id);
   }
   return ids;
 }
