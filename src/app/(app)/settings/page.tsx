@@ -5,7 +5,11 @@ import type { UserProfile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: { saved?: string };
+}) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
@@ -20,6 +24,11 @@ export default async function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10 space-y-4">
+      {searchParams.saved && (
+        <p className="rounded-lg border border-success/30 bg-success-soft p-3 text-sm">
+          ✅ Your preferences were saved.
+        </p>
+      )}
       <div className="card">
         <h2 className="text-xl font-bold">Your resume &amp; profile</h2>
         {hasProfile ? (

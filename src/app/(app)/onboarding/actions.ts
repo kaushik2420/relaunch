@@ -1,5 +1,6 @@
 "use server";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { expandToMatchTerms } from "@/lib/locations";
@@ -40,7 +41,16 @@ export async function saveProfileAction(formData: FormData) {
     },
   };
 
-  await sb.from("users").update({ profile: merged }).eq("id", user.id);
+  const { error: profileErr } = await sb
+    .from("users")
+    .update({ profile: merged })
+    .eq("id", user.id);
+  if (profileErr) {
+    redirect(
+      "/onboarding/profile?error=" +
+        encodeURIComponent(`Couldn't save profile — ${profileErr.message}`),
+    );
+  }
 
   const posthog = getPostHogClient();
   posthog.capture({
@@ -55,6 +65,8 @@ export async function saveProfileAction(formData: FormData) {
   });
   await posthog.shutdown();
 
+  revalidatePath("/onboarding/preferences");
+  revalidatePath("/settings");
   redirect("/onboarding/preferences");
 }
 
@@ -104,7 +116,7 @@ export async function savePreferencesAction(formData: FormData) {
       ? pivotBrief.suggestedRoleFamily
       : roleFamily;
 
-  await sb
+  const { error: updateErr } = await sb
     .from("users")
     .update({
       locations,
@@ -121,6 +133,14 @@ export async function savePreferencesAction(formData: FormData) {
     })
     .eq("id", user.id);
 
+  // Surface the real reason instead of silently redirecting as if it saved.
+  if (updateErr) {
+    redirect(
+      "/onboarding/preferences?error=" +
+        encodeURIComponent(`Couldn't save preferences — ${updateErr.message}`),
+    );
+  }
+
   const posthog = getPostHogClient();
   posthog.capture({
     distinctId: user.id,
@@ -135,5 +155,19 @@ export async function savePreferencesAction(formData: FormData) {
   });
   await posthog.shutdown();
 
-  redirect("/onboarding/connect");
+  // Clear cached renders so the new values show everywhere immediately.
+  revalidatePath("/onboarding/preferences");
+  revalidatePath("/settings");
+  revalidatePath("/dashboard");
+
+  // Already-onboarded users (editing from Settings) return to Settings;
+  // first-run onboarding continues to the Google-connect step.
+  const { data: onboarded } = await sb
+    .from("users")
+    .select("user_sheet_id")
+    .eq("id", user.id)
+    .single();
+  redirect(
+    onboarded?.user_sheet_id ? "/settings?saved=1" : "/onboarding/connect",
+  );
 }

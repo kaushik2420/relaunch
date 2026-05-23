@@ -8,7 +8,11 @@ import { detectSelectedIds } from '@/lib/locations';
 import { roleFamiliesByGroup } from '@/lib/role-families';
 import type { PivotBrief } from '@/lib/types';
 
-export default async function PreferencesPage() {
+export default async function PreferencesPage({
+  searchParams,
+}: {
+  searchParams: { error?: string };
+}) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
@@ -31,6 +35,12 @@ export default async function PreferencesPage() {
       <div className="card">
         <h1 className="text-2xl font-bold">What are you looking for?</h1>
         <p className="mt-1 text-sm text-ink-soft">We'll use this to find roles that fit your life — not just your skills.</p>
+
+        {searchParams.error && (
+          <p className="mt-4 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
+            {decodeURIComponent(searchParams.error)}
+          </p>
+        )}
 
         <form action={savePreferencesAction} className="mt-6 space-y-4">
           <div>
