@@ -116,7 +116,7 @@ export async function savePreferencesAction(formData: FormData) {
       ? pivotBrief.suggestedRoleFamily
       : roleFamily;
 
-  const { error: updateErr } = await sb
+  const { data: updatedRows, error: updateErr } = await sb
     .from("users")
     .update({
       locations,
@@ -131,13 +131,24 @@ export async function savePreferencesAction(formData: FormData) {
       pivot_enabled: pivotEnabled,
       pivot_brief: pivotBrief,
     })
-    .eq("id", user.id);
+    .eq("id", user.id)
+    .select("id");
 
   // Surface the real reason instead of silently redirecting as if it saved.
   if (updateErr) {
     redirect(
       "/onboarding/preferences?error=" +
         encodeURIComponent(`Couldn't save preferences — ${updateErr.message}`),
+    );
+  }
+  // A successful call that touched ZERO rows means the write was blocked
+  // (almost always row-level security) — don't claim it saved.
+  if (!updatedRows || updatedRows.length === 0) {
+    redirect(
+      "/onboarding/preferences?error=" +
+        encodeURIComponent(
+          "Save didn't apply — no row was updated (likely a permissions issue). Please report this.",
+        ),
     );
   }
 
