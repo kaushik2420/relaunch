@@ -97,6 +97,19 @@ export async function savePreferencesAction(formData: FormData) {
   const roleFamilyRaw = String(formData.get("roleFamily") ?? "").trim();
   const roleFamily = ROLE_FAMILY_IDS.has(roleFamilyRaw) ? roleFamilyRaw : null;
 
+  // --- TEMPORARY DIAGNOSTIC: capture exactly what the form submitted, so
+  // we can see why locations / work modes don't persist. Removed once fixed.
+  const diag = encodeURIComponent(
+    JSON.stringify({
+      allFields: Array.from(new Set(formData.keys())),
+      roleFamily: roleFamilyRaw || "(empty)",
+      workModes,
+      locationIds,
+      locationsExpanded: locations,
+    }),
+  );
+  console.log("[savePreferences] received:", decodeURIComponent(diag));
+
   // Career-pivot fields (from PivotPanel). pivot_brief is a JSON blob;
   // parse defensively — a malformed brief shouldn't break saving prefs.
   const pivotEnabled = String(formData.get("pivotEnabled") ?? "") === "true";
@@ -187,6 +200,8 @@ export async function savePreferencesAction(formData: FormData) {
     .eq("id", user.id)
     .single();
   redirect(
-    onboarded?.user_sheet_id ? "/settings?saved=1" : "/onboarding/connect",
+    onboarded?.user_sheet_id
+      ? `/settings?saved=1&diag=${diag}`
+      : "/onboarding/connect",
   );
 }
