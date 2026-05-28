@@ -1,4 +1,5 @@
 import { setNewPasswordAction } from '../actions';
+import { SubmitButton } from '@/components/SubmitButton';
 
 export default function ResetPage({ searchParams }: { searchParams: { error?: string } }) {
   return (
@@ -14,7 +15,9 @@ export default function ResetPage({ searchParams }: { searchParams: { error?: st
           <input name="confirm" type="password" minLength={8} required className="input" />
         </div>
         {searchParams.error && <p className="text-sm text-danger">{decodeURIComponent(searchParams.error)}</p>}
-        <button className="btn-primary w-full">Update password</button>
+        <SubmitButton className="btn-primary w-full" pendingLabel="Updating…">
+          Update password
+        </SubmitButton>
       </form>
     </div>
   );

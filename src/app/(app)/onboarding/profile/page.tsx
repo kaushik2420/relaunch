@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { saveProfileAction } from '../actions';
 import { Stepper } from '@/components/Stepper';
+import { SubmitButton } from '@/components/SubmitButton';
 import type { UserProfile } from '@/lib/types';
 
 export default async function ProfilePage() {
@@ -42,7 +43,9 @@ export default async function ProfilePage() {
 
           <div className="flex justify-between pt-2">
             <a href="/onboarding/upload" className="btn-soft">← Re-upload</a>
-            <button className="btn-primary">Looks good — next</button>
+            <SubmitButton className="btn-primary" pendingLabel="Saving…">
+              Looks good — next
+            </SubmitButton>
           </div>
         </form>
       </div>

@@ -6,6 +6,7 @@ import { LocationPicker } from './LocationPicker';
 import { PivotPanel } from './PivotPanel';
 import { detectSelectedIds } from '@/lib/locations';
 import { roleFamiliesByGroup } from '@/lib/role-families';
+import { SubmitButton } from '@/components/SubmitButton';
 import type { PivotBrief } from '@/lib/types';
 
 export default async function PreferencesPage({
@@ -147,7 +148,9 @@ export default async function PreferencesPage({
 
           <div className="flex justify-between pt-2">
             <a href="/onboarding/profile" className="btn-soft">← Back</a>
-            <button className="btn-primary">Continue →</button>
+            <SubmitButton className="btn-primary" pendingLabel="Saving…">
+              Continue →
+            </SubmitButton>
           </div>
         </form>
       </div>

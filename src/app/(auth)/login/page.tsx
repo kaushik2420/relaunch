@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { signInAction } from '../actions';
+import { SubmitButton } from '@/components/SubmitButton';
 
 export default function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
   return (
@@ -21,7 +22,9 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
           <p className="text-sm text-danger">{decodeURIComponent(searchParams.error)}</p>
         )}
 
-        <button type="submit" className="btn-primary w-full">Sign in</button>
+        <SubmitButton className="btn-primary w-full" pendingLabel="Signing in…">
+          Sign in
+        </SubmitButton>
       </form>
 
       <div className="mt-4 flex items-center justify-between text-sm">

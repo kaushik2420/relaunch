@@ -3,6 +3,7 @@ import { evaluateCohortCapacity } from "@/lib/services/billing";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { signUpAction } from "../actions";
 import { EmpathyBanner } from "@/components/EmpathyBanner";
+import { SubmitButton } from "@/components/SubmitButton";
 
 /**
  * Signup is invite-only. A valid `?invite=<token>` is required — the
@@ -150,9 +151,9 @@ export default async function SignupPage({
           </p>
         )}
 
-        <button type="submit" className="btn-primary w-full">
+        <SubmitButton className="btn-primary w-full" pendingLabel="Creating your account…">
           Create account
-        </button>
+        </SubmitButton>
 
         <p className="text-xs text-ink-mute">
           By signing up you agree to our{" "}

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { Spinner } from '@/components/Spinner';
 import type { PivotBrief } from '@/lib/types';
 
 /**
@@ -161,7 +162,13 @@ export function PivotPanel({
               disabled={busy !== null}
               className="btn-soft text-sm"
             >
-              {busy === 'clarify' ? 'Thinking…' : '✨ Refine with AI'}
+              {busy === 'clarify' ? (
+                <span className="inline-flex items-center gap-2">
+                  <Spinner size={12} /> Thinking…
+                </span>
+              ) : (
+                '✨ Refine with AI'
+              )}
             </button>
           )}
 
@@ -192,7 +199,13 @@ export function PivotPanel({
                   disabled={busy !== null}
                   className="btn-primary text-sm"
                 >
-                  {busy === 'synthesize' ? 'Building your plan…' : 'Build my pivot plan →'}
+                  {busy === 'synthesize' ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Spinner size={12} /> Building your plan…
+                    </span>
+                  ) : (
+                    'Build my pivot plan →'
+                  )}
                 </button>
                 <button
                   type="button"

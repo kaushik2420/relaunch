@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { joinWaitlistAction } from "@/app/(auth)/actions";
+import { SubmitButton } from "@/components/SubmitButton";
 import posthog from "posthog-js";
 
 /**
@@ -74,9 +75,9 @@ export function WaitlistForm() {
           So we can review your background before sending an invite.
         </p>
       </div>
-      <button type="submit" className="btn-primary w-full">
+      <SubmitButton className="btn-primary w-full" pendingLabel="Sending your request…">
         Request early access
-      </button>
+      </SubmitButton>
       <p className="text-center text-xs text-ink-mute">
         No spam, ever. We only email you if there's a seat.
       </p>

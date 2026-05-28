@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Spinner } from './Spinner';
 
 interface ProviderResult {
   name: string;
@@ -62,7 +63,14 @@ export function RunNowButton() {
         disabled={state === 'running'}
         className="btn-primary w-full justify-center disabled:opacity-60"
       >
-        {state === 'running' ? '⏳ Running…' : '⚡ Find matches now'}
+        {state === 'running' ? (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Spinner size={14} />
+            <span>Finding matches…</span>
+          </span>
+        ) : (
+          '⚡ Find matches now'
+        )}
       </button>
       {message && (
         <p

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { submitFeedbackAction } from "@/app/feedback/actions";
+import { SubmitButton } from "@/components/SubmitButton";
 
 /**
  * Quick in-app feedback form. Rating is optional; message is required.
@@ -99,9 +100,9 @@ export function FeedbackForm({
         />
       </div>
 
-      <button type="submit" className="btn-primary w-full">
+      <SubmitButton className="btn-primary w-full" pendingLabel="Sending…">
         Send feedback
-      </button>
+      </SubmitButton>
       <p className="text-center text-xs text-ink-mute">
         Goes straight to the founder. Thank you for helping shape Relaunch.
       </p>

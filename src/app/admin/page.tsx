@@ -8,6 +8,7 @@ import {
   estimateMonthlyCost,
   type CostEstimate,
 } from "@/lib/services/cost-estimate";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -177,17 +178,20 @@ export default async function AdminPage({
                     ) : (
                       <form action={approveAndInviteAction}>
                         <input type="hidden" name="waitlistId" value={r.id} />
-                        <button
+                        <SubmitButton
                           className={
                             r.status === "invited"
                               ? "btn-ghost text-xs"
                               : "btn-primary text-xs"
                           }
+                          pendingLabel={
+                            r.status === "invited" ? "Resending…" : "Sending…"
+                          }
                         >
                           {r.status === "invited"
                             ? "Resend invite"
                             : "Approve & send invite"}
-                        </button>
+                        </SubmitButton>
                       </form>
                     )}
                   </td>

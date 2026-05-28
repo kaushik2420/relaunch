@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { sendResetAction } from '../actions';
+import { SubmitButton } from '@/components/SubmitButton';
 
 export default function ForgotPage({ searchParams }: { searchParams: { sent?: string; error?: string } }) {
   if (searchParams.sent === '1') {
@@ -23,7 +24,9 @@ export default function ForgotPage({ searchParams }: { searchParams: { sent?: st
           <input name="email" type="email" required className="input" autoComplete="email" />
         </div>
         {searchParams.error && <p className="text-sm text-danger">{decodeURIComponent(searchParams.error)}</p>}
-        <button className="btn-primary w-full">Send reset link</button>
+        <SubmitButton className="btn-primary w-full" pendingLabel="Sending link…">
+          Send reset link
+        </SubmitButton>
       </form>
       <p className="mt-4 text-sm text-center">
         <Link href="/login" className="text-brand-700 hover:underline">← Back to sign in</Link>
