@@ -136,3 +136,21 @@ export function detectSelectedIds(savedLocations: string[]): string[] {
   }
   return ids;
 }
+
+/**
+ * For job-provider queries: turn the saved match-term list back into one
+ * canonical primary term per selected location (e.g. "Bengaluru", not the
+ * full ["Bengaluru","Bangalore","BLR"] alias set). Providers want clean
+ * city names per request; the alias expansions are only useful for the
+ * post-fetch substring filter.
+ */
+export function canonicalLocationLabels(savedLocations: string[]): string[] {
+  const ids = detectSelectedIds(savedLocations);
+  if (!ids.length) return savedLocations;
+  const out: string[] = [];
+  for (const id of ids) {
+    const opt = findLocation(id);
+    if (opt?.matchTerms[0]) out.push(opt.matchTerms[0]);
+  }
+  return out.length ? out : savedLocations;
+}

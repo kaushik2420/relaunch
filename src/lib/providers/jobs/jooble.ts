@@ -13,27 +13,41 @@ export class JoobleProvider implements JobProvider {
     const cfg = serverConfig();
     if (!cfg.JOOBLE_API_KEY) throw new Error('JOOBLE_API_KEY not set');
 
+    // One call per city — joining a comma-separated list confuses Jooble's
+    // parser and yields a single noisy result set. Capped at 6 cities.
+    const MAX = 6;
+    const locs = q.locations.length ? q.locations.slice(0, MAX) : [''];
+    const perCall = Math.max(Math.ceil((q.limit ?? 20) / locs.length), 5);
+
     const url = `https://jooble.org/api/${cfg.JOOBLE_API_KEY}`;
-    const body = {
-      keywords: q.query,
-      location: q.locations.join(', '),
-      page: 1,
-      ResultOnPage: q.limit ?? 20,
-      datecreatedfrom: daysAgo(q.postedWithinDays ?? 7),
-    };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      console.warn(`[jooble] HTTP ${res.status}`);
-      return [];
+    const results: JobPosting[] = [];
+    for (const loc of locs) {
+      const body = {
+        keywords: q.query,
+        location: loc,
+        page: 1,
+        ResultOnPage: perCall,
+        datecreatedfrom: daysAgo(q.postedWithinDays ?? 7),
+      };
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          console.warn(`[jooble] ${loc || '*'} → HTTP ${res.status}`);
+          continue;
+        }
+        const data: { jobs?: JoobleResult[] } = await res.json();
+        const mapped = (data.jobs ?? []).map(mapJooble);
+        console.log(`[jooble] ${loc || '*'} → ${mapped.length} jobs`);
+        results.push(...mapped);
+      } catch (err) {
+        console.warn(`[jooble] ${loc || '*'} → ${(err as Error).message}`);
+      }
     }
-    const data: { jobs?: JoobleResult[] } = await res.json();
-    const mapped = (data.jobs ?? []).map(mapJooble);
-    console.log(`[jooble] ${body.location || '*'} → ${mapped.length} jobs`);
-    return mapped;
+    return results;
   }
 }
 

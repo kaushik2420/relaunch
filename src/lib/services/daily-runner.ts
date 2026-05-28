@@ -6,6 +6,7 @@ import { llm } from '@/lib/providers/llm';
 import { sheets } from '@/lib/providers/sheets';
 import { email as emailProvider } from '@/lib/providers/email';
 import { findReferrers, buildConnectionsSearchUrl } from './referrer-finder';
+import { canonicalLocationLabels } from '@/lib/locations';
 import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief } from '@/lib/types';
 
 /**
@@ -42,9 +43,14 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // seniority words, and cap to ~40 chars.
   const query = pivotBrief?.searchQuery?.trim() || deriveJobQuery(profile);
   console.log(`[daily-runner] query="${query}" pivot=${pivotBrief ? 'on' : 'off'} roleFamily=${userRow.role_family ?? '(none)'} locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
+  // Providers want one clean city name per request, not the expanded
+  // alias list we store for substring filtering. Convert before sending.
+  const queryLocations = prefs.locations.length
+    ? canonicalLocationLabels(prefs.locations)
+    : ['India'];
   const jobs = await fetchJobsFromAll({
     query,
-    locations: prefs.locations.length ? prefs.locations : ['India'],
+    locations: queryLocations,
     workMode: prefs.workModes[0] ?? 'any',
     roleFamily: (userRow.role_family as 'engineering' | 'product' | 'design' | 'data' | 'marketing' | 'operations' | 'sales' | 'other' | null) ?? undefined,
     limit: 60,

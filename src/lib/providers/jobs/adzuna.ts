@@ -30,19 +30,15 @@ export class AdzunaProvider implements JobProvider {
       return [];
     }
 
-    // Pick the CANONICAL location per country so we don't fire 10+ calls
-    // when the user has multiple spelling aliases (Bengaluru / Bangalore / BLR).
-    // Group by country, take one representative city each, max 3 countries.
-    const groups = new Map<string, string>();
-    for (const loc of q.locations.length ? q.locations : ['']) {
-      const country = this.countryFor(loc);
-      if (!groups.has(country)) groups.set(country, loc);
-      if (groups.size >= 3) break;
-    }
-    if (groups.size === 0) groups.set('in', '');
+    // Adzuna's `where` filters by ONE city per call. To honour a multi-
+    // city selection, fire one call per location. Capped at 6 so a wildly
+    // long selection can't blow through Adzuna's free 1k/day budget.
+    const MAX = 6;
+    const locs = q.locations.length ? q.locations.slice(0, MAX) : [''];
 
     const results: JobPosting[] = [];
-    for (const [country, loc] of groups) {
+    for (const loc of locs) {
+      const country = this.countryFor(loc);
       // Try the user's exact query first. If empty, retry with just the
       // last word (usually the role family — "Engineer", "Manager", etc.)
       // Adzuna's `what` matcher is strict; broader queries return more.
