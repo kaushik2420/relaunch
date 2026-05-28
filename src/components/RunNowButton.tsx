@@ -43,7 +43,7 @@ export function RunNowButton() {
       setState('success');
       setMessage(
         data.emailed && data.emailed > 0
-          ? `Found ${data.matchesFound} roles · emailed your top ${data.emailed} 🌅`
+          ? `Scanned ${data.matchesFound} roles · tailored the top ${data.emailed} for you`
           : 'Quieter day on our side — no strong matches. See breakdown below.',
       );
       setProviders(data.providers ?? []);
