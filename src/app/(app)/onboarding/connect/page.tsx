@@ -11,7 +11,31 @@ export default async function ConnectPage({
 }) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
-  if (!user) redirect('/login');
+  if (!user) {
+    // OAuth round-trips occasionally drop the Supabase session cookie. If
+    // the user just finished Google connect, their data is already saved —
+    // they just need to sign in once. Tell them that explicitly so the
+    // momentary "logged out" doesn't feel like a bug.
+    if (searchParams.status === 'connected') {
+      return (
+        <div className="mx-auto max-w-md px-6 py-12 text-center">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-success-soft text-3xl">
+            ✅
+          </div>
+          <h1 className="mt-4 text-2xl font-bold">Google connected — almost there</h1>
+          <p className="mt-2 text-sm text-ink-soft">
+            Your Google Sheet is ready. The Google round-trip signed you out
+            briefly — sign in once more and you&apos;ll land on your dashboard
+            with everything saved.
+          </p>
+          <Link href="/login" className="btn-primary mt-6 inline-flex">
+            Sign in to continue →
+          </Link>
+        </div>
+      );
+    }
+    redirect('/login');
+  }
 
   const { data: row } = await sb
     .from('users')

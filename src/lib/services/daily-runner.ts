@@ -7,6 +7,11 @@ import { sheets } from '@/lib/providers/sheets';
 import { email as emailProvider } from '@/lib/providers/email';
 import { findReferrers, buildConnectionsSearchUrl } from './referrer-finder';
 import { canonicalLocationLabels } from '@/lib/locations';
+import {
+  findRoleFamily,
+  queryMatchesFamily,
+  familyQuery,
+} from '@/lib/role-families';
 import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief } from '@/lib/types';
 
 /**
@@ -41,7 +46,21 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // For pivot users we use the brief's searchQuery; otherwise we derive
   // a clean role title from the most recent experience entry, strip
   // seniority words, and cap to ~40 chars.
-  const query = pivotBrief?.searchQuery?.trim() || deriveJobQuery(profile);
+  let query = pivotBrief?.searchQuery?.trim() || deriveJobQuery(profile);
+  // If the user picked a role family AND the résumé-derived query doesn't
+  // hint at it, the résumé is out of date / mid-career-change — trust the
+  // dropdown and search the family's preferred keyword instead. Pivot mode
+  // already handles intentional career changes; this catches the silent
+  // cases (e.g. résumé says "Solution Engineer" but they've moved into
+  // Partnerships).
+  const rf = userRow.role_family ? findRoleFamily(userRow.role_family) : undefined;
+  if (rf && !pivotBrief && !queryMatchesFamily(query, rf)) {
+    const override = familyQuery(rf);
+    console.log(
+      `[daily-runner] query "${query}" doesn't match role_family "${rf.id}" — using "${override}" instead`,
+    );
+    query = override;
+  }
   console.log(`[daily-runner] query="${query}" pivot=${pivotBrief ? 'on' : 'off'} roleFamily=${userRow.role_family ?? '(none)'} locations=${(prefs.locations.length ? prefs.locations : ['India']).join(',')}`);
   // Providers want one clean city name per request, not the expanded
   // alias list we store for substring filtering. Convert before sending.

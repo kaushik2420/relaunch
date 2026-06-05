@@ -105,6 +105,29 @@ export function findRoleFamily(id: string | null | undefined): RoleFamily | unde
   return ROLE_FAMILIES.find((r) => r.id === id);
 }
 
+/**
+ * Does the user's job-search query string already hint at this role family?
+ * Used to decide whether to keep the résumé-derived query or override it
+ * with the family's preferred keyword (e.g. when the résumé still says
+ * "Solution Engineer" but the user has picked Partnerships).
+ */
+export function queryMatchesFamily(query: string, rf: RoleFamily): boolean {
+  const q = query.toLowerCase();
+  return rf.greenhouseSignals.some((sig) => q.includes(sig.toLowerCase()));
+}
+
+/**
+ * A clean keyword phrase for searching jobs in this role family. Drops the
+ * "/ alt name" and "(general)" suffix from the label so we send providers
+ * something like "Partnerships" rather than "Partnerships / BD".
+ */
+export function familyQuery(rf: RoleFamily): string {
+  return rf.label
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .split(' / ')[0]!
+    .trim();
+}
+
 /** Group families for the dropdown's <optgroup>s. Preserves the canonical order. */
 export function roleFamiliesByGroup(): { group: string; items: RoleFamily[] }[] {
   const order: RoleFamily['group'][] = [

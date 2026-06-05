@@ -32,5 +32,8 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/razorpay/webhook).*)'],
+  // Skip Google's OAuth callback — middleware's session refresh writes
+  // cookies that don't always propagate to the route handler's redirect,
+  // which would drop the Supabase session and sign the user out mid-flow.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/razorpay/webhook|api/google/callback).*)'],
 };
