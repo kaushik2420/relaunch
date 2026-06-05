@@ -19,7 +19,7 @@ export default async function PreferencesPage({
   if (!user) redirect('/login');
   const { data: row } = await sb
     .from('users')
-    .select('locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, role_family, pivot_enabled, pivot_brief')
+    .select('locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, role_family, pivot_enabled, pivot_brief, search_query')
     .eq('id', user.id)
     .single();
 
@@ -64,6 +64,21 @@ export default async function PreferencesPage({
             <p className="mt-1 text-xs text-ink-mute">
               We use this to scope each job source to the right category — big recall boost.
               Changing careers? Use the pivot option below and we'll point the search there instead.
+            </p>
+          </div>
+
+          <div>
+            <label className="label" htmlFor="searchQuery">Job titles to search for (optional)</label>
+            <input
+              id="searchQuery"
+              name="searchQuery"
+              defaultValue={(row?.search_query as string | null) ?? ''}
+              className="input"
+              placeholder="Auto-derived from your résumé — type to override"
+            />
+            <p className="mt-1 text-xs text-ink-mute">
+              Helpful if your résumé says one thing but you're targeting another
+              (e.g. moving from Software Engineer into Partnerships).
             </p>
           </div>
 

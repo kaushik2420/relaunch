@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { ReactionButtons } from './ReactionButtons';
+import { MatchBar } from './MatchBar';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 /**
@@ -13,13 +14,6 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
   const [hidden, setHidden] = useState(false);
   if (hidden) return null;
 
-  const matchTone =
-    m.matchPercent >= 90
-      ? 'bg-success-soft text-success'
-      : m.matchPercent >= 75
-      ? 'bg-brand-50 text-brand-700'
-      : 'bg-accent-50 text-accent-600';
-
   return (
     <div className="card">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -30,11 +24,7 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
             {m.mode && m.mode !== 'unknown' ? ` · ${m.mode}` : ''}
           </p>
         </div>
-        {m.matchPercent > 0 && (
-          <span className={`px-3 py-1 rounded-full text-xs font-bold ${matchTone}`}>
-            {m.matchPercent}% match
-          </span>
-        )}
+        {m.matchPercent > 0 && <MatchBar percent={m.matchPercent} />}
       </div>
 
       {m.expectedCtc && (

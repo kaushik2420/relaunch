@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { ReactionButtons } from './ReactionButtons';
+import { MatchBar } from './MatchBar';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 /**
@@ -38,15 +39,6 @@ function JobRow({ m }: { m: SheetMatchRow }) {
   const [hidden, setHidden] = useState(false);
   if (hidden) return null;
 
-  const matchTone =
-    m.matchPercent >= 90
-      ? 'bg-success-soft text-success'
-      : m.matchPercent >= 75
-      ? 'bg-brand-50 text-brand-700'
-      : m.matchPercent >= 60
-      ? 'bg-accent-50 text-accent-600'
-      : 'bg-surface-muted text-ink-soft';
-
   return (
     <tr className="border-t border-line hover:bg-surface-muted/50">
       <td className="px-3 py-2.5 font-medium">
@@ -62,9 +54,7 @@ function JobRow({ m }: { m: SheetMatchRow }) {
       <td className="px-3 py-2.5 text-ink-soft">{m.company}</td>
       <td className="px-3 py-2.5">
         {m.matchPercent > 0 ? (
-          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${matchTone}`}>
-            {m.matchPercent}%
-          </span>
+          <MatchBar percent={m.matchPercent} />
         ) : (
           <span className="text-ink-mute text-xs">—</span>
         )}

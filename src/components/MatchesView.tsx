@@ -22,12 +22,14 @@ const VIEW_KEY = 'relaunch.matches.view';
 type ViewMode = 'cards' | 'table';
 type ModeFilter = 'all' | 'remote' | 'hybrid' | 'onsite';
 type MatchFilter = 'all' | '90' | '75' | '60';
+type SortKey = 'best' | 'newest';
 
 export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   const [view, setView] = useState<ViewMode>('cards');
   const [modeFilter, setModeFilter] = useState<ModeFilter>('all');
   const [locationFilter, setLocationFilter] = useState<string>('all');
   const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
+  const [sortBy, setSortBy] = useState<SortKey>('best');
   const [page, setPage] = useState(1);
 
   // Hydrate view preference from localStorage on first render.
@@ -43,10 +45,10 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
     window.localStorage.setItem(VIEW_KEY, view);
   }, [view]);
 
-  // Reset to page 1 whenever filters change.
+  // Reset to page 1 whenever filters or sort change.
   useEffect(() => {
     setPage(1);
-  }, [modeFilter, locationFilter, matchFilter]);
+  }, [modeFilter, locationFilter, matchFilter, sortBy]);
 
   // Unique locations present in the result set — derived from data so we
   // don't show options that filter to zero rows.
@@ -78,10 +80,24 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
     });
   }, [matches, modeFilter, locationFilter, matchFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    if (sortBy === 'newest') {
+      arr.sort((a, b) => {
+        const da = new Date(a.date).getTime();
+        const db = new Date(b.date).getTime();
+        return (Number.isFinite(db) ? db : 0) - (Number.isFinite(da) ? da : 0);
+      });
+    } else {
+      arr.sort((a, b) => b.matchPercent - a.matchPercent);
+    }
+    return arr;
+  }, [filtered, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * PAGE_SIZE;
-  const slice = filtered.slice(start, start + PAGE_SIZE);
+  const slice = sorted.slice(start, start + PAGE_SIZE);
 
   const anyFilterActive =
     modeFilter !== 'all' || locationFilter !== 'all' || matchFilter !== 'all';
@@ -111,6 +127,16 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
             { v: '90', label: '90%+' },
             { v: '75', label: '75%+' },
             { v: '60', label: '60%+' },
+          ]}
+        />
+
+        <FilterChips
+          label="Sort"
+          value={sortBy}
+          onChange={(v) => setSortBy(v as SortKey)}
+          options={[
+            { v: 'best', label: '🏆 Best match' },
+            { v: 'newest', label: '🕒 Newest' },
           ]}
         />
 
@@ -172,7 +198,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
       </div>
 
       {/* Listing */}
-      {filtered.length === 0 ? (
+      {sorted.length === 0 ? (
         <div className="card text-center py-8">
           <p className="text-sm text-ink-soft">
             No matches fit those filters. Try widening them.
@@ -193,7 +219,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
         <Pagination
           page={safePage}
           totalPages={totalPages}
-          visibleCount={filtered.length}
+          visibleCount={sorted.length}
           onPrev={() => setPage((p) => Math.max(1, p - 1))}
           onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
         />

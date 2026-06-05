@@ -46,15 +46,17 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // For pivot users we use the brief's searchQuery; otherwise we derive
   // a clean role title from the most recent experience entry, strip
   // seniority words, and cap to ~40 chars.
-  let query = pivotBrief?.searchQuery?.trim() || deriveJobQuery(profile);
-  // If the user picked a role family AND the résumé-derived query doesn't
-  // hint at it, the résumé is out of date / mid-career-change — trust the
-  // dropdown and search the family's preferred keyword instead. Pivot mode
-  // already handles intentional career changes; this catches the silent
-  // cases (e.g. résumé says "Solution Engineer" but they've moved into
-  // Partnerships).
+  // Query resolution order: pivot brief > explicit search_query > résumé.
+  const userSearchQuery = (userRow.search_query ?? '').trim();
+  let query =
+    pivotBrief?.searchQuery?.trim() ||
+    userSearchQuery ||
+    deriveJobQuery(profile);
+  // If the user picked a role family AND nothing explicit was supplied AND
+  // the résumé-derived query doesn't hint at the family, the résumé is out
+  // of date / mid-career-change — trust the dropdown instead.
   const rf = userRow.role_family ? findRoleFamily(userRow.role_family) : undefined;
-  if (rf && !pivotBrief && !queryMatchesFamily(query, rf)) {
+  if (rf && !pivotBrief && !userSearchQuery && !queryMatchesFamily(query, rf)) {
     const override = familyQuery(rf);
     console.log(
       `[daily-runner] query "${query}" doesn't match role_family "${rf.id}" — using "${override}" instead`,
@@ -301,7 +303,7 @@ export async function pickUsersForThisHour(now = new Date()) {
   const { data, error } = await supabaseAdmin()
     .from('users')
     .select(
-      'id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family, pivot_enabled, pivot_brief'
+      'id, email, first_name, profile, locations, work_modes, target_ctc, phone, notice_period, notes, email_frequency, email_time, timezone, google_refresh_token_enc, user_sheet_id, last_run_at, free_until, is_paying, role_family, pivot_enabled, pivot_brief, search_query'
     )
     .eq('is_active', true)
     .neq('email_frequency', 'paused');
@@ -361,4 +363,5 @@ export interface UserRow {
   role_family?: string | null;
   pivot_enabled?: boolean | null;
   pivot_brief?: unknown;
+  search_query?: string | null;
 }

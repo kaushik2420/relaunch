@@ -138,6 +138,8 @@ export async function savePreferencesAction(formData: FormData) {
       role_family: effectiveRoleFamily,
       pivot_enabled: pivotEnabled,
       pivot_brief: pivotBrief,
+      search_query:
+        String(formData.get("searchQuery") ?? "").trim() || null,
     })
     .eq("id", user.id)
     .select("id");
