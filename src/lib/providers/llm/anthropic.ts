@@ -330,6 +330,62 @@ Rules:
     const { embedWithOpenAI } = await import('./openai-embed');
     return embedWithOpenAI(texts);
   }
+
+  // ----------------------------------------------------------------
+  // verifyJobMatch — Haiku-powered last-mile fit check on the shortlist
+  // ----------------------------------------------------------------
+  async verifyJobMatch({
+    profile,
+    job,
+    targetRoleFamily,
+    pivotBrief,
+  }: {
+    profile: UserProfile;
+    job: JobPosting;
+    targetRoleFamily?: string;
+    pivotBrief?: PivotBrief;
+  }): Promise<{ score: number; reason: string }> {
+    const familyLabel = targetRoleFamily
+      ? ROLE_FAMILIES.find((r) => r.id === targetRoleFamily)?.label ?? null
+      : null;
+    const targetLine = pivotBrief?.searchQuery
+      ? `Target (career pivot): "${pivotBrief.searchQuery}" — ${pivotBrief.refinedSummary}`
+      : familyLabel
+        ? `Target role family: ${familyLabel}`
+        : `Current/last role from résumé: ${profile.experience?.[0]?.title ?? '(unknown)'}`;
+
+    const prompt = `You are a strict filter for a job-search tool. Score how well a job posting actually matches what a candidate is looking for. Be HARSH on near-misses: e.g. a "Senior Backend Engineer" posting should score VERY LOW for a candidate targeting "Customer Success Manager", regardless of how prestigious the company is.
+
+CANDIDATE:
+${targetLine}
+Recent role from résumé: ${profile.experience?.[0]?.title ?? '(unknown)'}
+Top skills: ${(profile.skills ?? []).slice(0, 10).join(', ')}
+
+JOB POSTING:
+Title: ${job.title}
+Company: ${job.company}
+Location: ${job.location}
+Description (first 1200 chars):
+${(job.description ?? '').slice(0, 1200)}
+
+Scoring rubric:
+- 80–100: clearly the right kind of role and roughly the right level.
+- 50–79: adjacent or partial match (right domain, wrong level, OR right level, wrong specialism).
+- 20–49: wrong kind of role — applying would mostly waste the candidate's time.
+- 0–19: completely off-topic.
+
+Output STRICT JSON: { "score": <integer 0–100>, "reason": "<one short sentence>" }`;
+
+    const message = await this.client.messages.create({
+      model: this.modelFast,
+      max_tokens: 200,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const out = extractJSON<{ score: number; reason: string }>(message);
+    const score = Math.max(0, Math.min(100, Math.round(Number(out.score) || 0)));
+    const reason = (out.reason ?? '').toString().slice(0, 240);
+    return { score, reason };
+  }
 }
 
 /**

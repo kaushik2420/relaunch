@@ -80,10 +80,43 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
 
   // 2. Rank + filter; take the top N (configurable)
   const ranked = await rankJobs(jobs, profile, prefs);
-  const top = ranked.slice(0, 5);
-  if (!top.length) {
+  if (!ranked.length) {
     return { matchesFound: 0, emailed: 0, providers: lastFetchSummary() };
   }
+
+  // 2b. Embedding rank is fast but coarse. Take the top 10 candidates,
+  // then ask Claude (Haiku) to verify each is actually about the kind of
+  // role this user wants. Drops obvious mismatches before we spend
+  // Sonnet tokens tailoring them. Falls back to the embedding ranking
+  // if verification errors or filters everything out.
+  const shortlist = ranked.slice(0, 10);
+  const verified = await Promise.all(
+    shortlist.map(async (r) => {
+      try {
+        const v = await llm().verifyJobMatch({
+          profile,
+          job: r.job,
+          targetRoleFamily: rf?.id,
+          pivotBrief: pivotBrief ?? undefined,
+        });
+        return { ...r, verifyScore: v.score, verifyReason: v.reason };
+      } catch (err) {
+        console.error('[daily-runner] verifyJobMatch failed', err);
+        return { ...r, verifyScore: 50, verifyReason: '' };
+      }
+    }),
+  );
+  const passed = verified.filter((r) => r.verifyScore >= 40);
+  const usable = passed.length ? passed : verified;
+  usable.sort(
+    (a, b) =>
+      (b.matchPercent + b.verifyScore) / 2 -
+      (a.matchPercent + a.verifyScore) / 2,
+  );
+  const top = usable.slice(0, 5);
+  console.log(
+    `[daily-runner] verified shortlist: kept ${passed.length}/${shortlist.length}, top scores ${top.map((t) => `${t.matchPercent}/${t.verifyScore}`).join(', ')}`,
+  );
 
   // We may need the Google refresh token both for writing the Sheet AND
   // for creating tailored-resume Docs. Decode once, share between steps.

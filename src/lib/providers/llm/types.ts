@@ -71,4 +71,17 @@ export interface LLMProvider {
 
   /** Embeds text for similarity matching. Cheap, batched. */
   embed(texts: string[]): Promise<number[][]>;
+
+  /**
+   * Strict verifier — given a candidate's target direction and a single
+   * job posting, score 0–100 how well the job actually matches what the
+   * candidate wants. Used as a cheap last-mile filter on the shortlist,
+   * so we never spend Sonnet tokens tailoring an obvious mismatch.
+   */
+  verifyJobMatch(input: {
+    profile: UserProfile;
+    job: JobPosting;
+    targetRoleFamily?: string;
+    pivotBrief?: PivotBrief;
+  }): Promise<{ score: number; reason: string }>;
 }
