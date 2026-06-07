@@ -2,7 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { hasBoostAccess, mondayOf } from "@/lib/services/boost-engine";
+import {
+  BOOST_LAUNCH_AT,
+  hasBoostAccess,
+  isBoostUnlocked,
+  mondayOf,
+} from "@/lib/services/boost-engine";
 import { CopyButton } from "./CopyButton";
 import { GenerateBriefButton } from "./GenerateBriefButton";
 
@@ -24,6 +29,46 @@ export default async function BoostPage() {
     .eq("id", user.id)
     .single();
   if (!row) redirect("/login");
+
+  // ---- PUBLIC LAUNCH GATE -----------------------------------------
+  // Until Tuesday 9 Jun 2026 09:30 IST, only the allowlist (Kaushik's
+  // account) can see Boost. Delete this block + the imports above the
+  // moment we're past launch.
+  if (!isBoostUnlocked(user.email)) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-10">
+        <div className="card text-center">
+          <div className="mx-auto h-12 w-12 rounded-full bg-brand-50 grid place-items-center text-brand-700 text-2xl">
+            🌱
+          </div>
+          <h1 className="mt-4 text-2xl font-bold">Boost is launching Tuesday</h1>
+          <p className="mt-3 text-sm text-ink-soft">
+            Our LinkedIn Boost coaching brief is in final polish for its public
+            launch on <strong>Tuesday, 9 June at 9:30 AM IST</strong>. We&apos;re
+            keeping it under wraps for a few more days so we can roll it out
+            cleanly to everyone at once.
+          </p>
+          <p className="mt-3 text-sm text-ink-soft">
+            Your first brief will be waiting here the moment the gate opens —
+            no action needed from your side. Keep using Relaunch as usual in
+            the meantime.
+          </p>
+          <Link href="/dashboard" className="btn-primary mt-6 inline-flex">
+            Back to dashboard
+          </Link>
+          <p className="mt-4 text-xs text-ink-mute">
+            Launching{" "}
+            {BOOST_LAUNCH_AT.toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "short",
+              timeZone: "Asia/Kolkata",
+            })}{" "}
+            IST.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // No profile yet → ask them to upload résumé first
   if (!row.profile || Object.keys(row.profile as object).length === 0) {

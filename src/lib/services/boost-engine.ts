@@ -106,3 +106,33 @@ export function hasBoostAccess(user: {
   }
   return false;
 }
+
+/**
+ * Public-launch gate for the Boost feature. Kept separate from
+ * `hasBoostAccess` so that post-launch we can rip just this function
+ * (and its callers) without touching entitlement logic.
+ *
+ * Until BOOST_LAUNCH_AT, only emails in BOOST_PREVIEW_ALLOWLIST can see
+ * the Boost tab/page — even if they're on an active trial or paid
+ * subscription. After that timestamp, everyone with `hasBoostAccess()`
+ * sees it as usual.
+ *
+ * Tuesday 9 Jun 2026, 9:30 AM IST  =  09:30 +05:30  =  04:00 UTC.
+ *
+ * The Monday cron is intentionally NOT gated — briefs pre-generate for
+ * every eligible user the day before launch so the page is full of
+ * content the moment the gate opens.
+ */
+export const BOOST_LAUNCH_AT = new Date("2026-06-09T04:00:00Z");
+export const BOOST_PREVIEW_ALLOWLIST: ReadonlySet<string> = new Set([
+  "kaushikn2416@gmail.com",
+]);
+
+export function isBoostUnlocked(
+  email: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (now >= BOOST_LAUNCH_AT) return true;
+  if (!email) return false;
+  return BOOST_PREVIEW_ALLOWLIST.has(email.trim().toLowerCase());
+}
