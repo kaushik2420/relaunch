@@ -4,7 +4,38 @@ import { evaluateTrial, priceLabel } from '@/lib/services/billing';
 import { EmpathyBanner } from '@/components/EmpathyBanner';
 import { startSubscriptionAction } from './actions';
 
-export default async function BillingPage() {
+const ERROR_COPY: Record<string, { title: string; body: string }> = {
+  plan_missing: {
+    title: "Subscriptions aren't fully configured yet.",
+    body: "Our team hasn't published the plan id to this environment. Drop us a note at hello@get-relaunch.com and we'll switch it on for you right away.",
+  },
+  plan_invalid: {
+    title: "The subscription plan looks misconfigured.",
+    body: "Razorpay didn't recognise our plan id. We've been alerted — please email hello@get-relaunch.com if you need to upgrade urgently.",
+  },
+  keys_missing: {
+    title: "Payments are temporarily unavailable.",
+    body: "Our Razorpay credentials aren't set in this environment. Hang tight — write to hello@get-relaunch.com and we'll get you a working link.",
+  },
+  keys_invalid: {
+    title: "Payments are temporarily unavailable.",
+    body: "Razorpay rejected our credentials. We've been notified — please reach out at hello@get-relaunch.com and we'll fix this within the hour.",
+  },
+  network: {
+    title: "Couldn't reach Razorpay just now.",
+    body: 'A transient network blip — please try again in a moment. If it keeps failing, write to hello@get-relaunch.com.',
+  },
+  unknown: {
+    title: "Something went wrong opening checkout.",
+    body: "Please try again, or write to us at hello@get-relaunch.com and we'll sort it out personally.",
+  },
+};
+
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams?: { status?: string; code?: string };
+}) {
   const sb = createSupabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
@@ -17,11 +48,23 @@ export default async function BillingPage() {
   if (!row) redirect('/login');
 
   const trial = evaluateTrial({ is_paying: row.is_paying ?? false, free_until: row.free_until as string });
+  const errorCopy =
+    searchParams?.status === 'error'
+      ? ERROR_COPY[searchParams.code ?? 'unknown'] ?? ERROR_COPY.unknown
+      : null;
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
       <div className="card">
         <h1 className="text-2xl font-bold">Your plan</h1>
+
+        {errorCopy && (
+          <div className="mt-4">
+            <EmpathyBanner icon="🙏" title={errorCopy.title}>
+              {errorCopy.body}
+            </EmpathyBanner>
+          </div>
+        )}
 
         {trial.status === 'paying' && (
           <p className="mt-2 text-sm text-success">You're on Relaunch Pro · {priceLabel()}</p>
