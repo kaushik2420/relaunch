@@ -99,6 +99,9 @@ export default async function AppLayout({
           <Link href="/upskill" className="hover:text-ink">
             Upskill
           </Link>
+          <Link href="/boost" className="hover:text-ink">
+            Boost
+          </Link>
           <Link href="/feedback" className="hover:text-ink">
             Feedback
           </Link>

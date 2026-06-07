@@ -7,6 +7,7 @@ import type {
   TailoredResume,
   PivotBrief,
   CoverLetter,
+  BoostBrief,
 } from '@/lib/types';
 import { ROLE_FAMILIES, ROLE_FAMILY_IDS } from '@/lib/role-families';
 
@@ -385,6 +386,79 @@ Output STRICT JSON: { "score": <integer 0–100>, "reason": "<one short sentence
     const score = Math.max(0, Math.min(100, Math.round(Number(out.score) || 0)));
     const reason = (out.reason ?? '').toString().slice(0, 240);
     return { score, reason };
+  }
+
+  // ----------------------------------------------------------------
+  // generateBoostBrief — weekly LinkedIn coaching brief
+  // ----------------------------------------------------------------
+  async generateBoostBrief({
+    profile,
+    roleFamilyLabel,
+    pivotBrief,
+    searchQuery,
+    weekStarting,
+  }: {
+    profile: UserProfile;
+    roleFamilyLabel?: string;
+    pivotBrief?: PivotBrief;
+    searchQuery?: string;
+    weekStarting: string;
+  }): Promise<BoostBrief> {
+    const targetLine = pivotBrief?.searchQuery
+      ? `Target (career pivot): "${pivotBrief.searchQuery}" — ${pivotBrief.refinedSummary}`
+      : searchQuery
+        ? `Target keywords: ${searchQuery}`
+        : roleFamilyLabel
+          ? `Target role family: ${roleFamilyLabel}`
+          : `Most recent role from résumé: ${profile.experience?.[0]?.title ?? '(unknown)'}`;
+
+    const prompt = `You are the LinkedIn coaching layer of a job-search tool called Relaunch. Generate this week's brief for a candidate navigating a job search. Four things into their hands: one post they could write, one concrete profile move, two communities to consider, one timing tip.
+
+CANDIDATE:
+Name: ${profile.fullName}
+${targetLine}
+Most recent role: ${profile.experience?.[0]?.title ?? '(unknown)'}${profile.experience?.[0]?.company ? ` at ${profile.experience[0].company}` : ''}
+Top skills: ${(profile.skills ?? []).slice(0, 8).join(', ')}
+Location: ${profile.location ?? '(unknown)'}
+Seniority: ${profile.seniority}
+
+WEEK OF: ${weekStarting}
+
+Output STRICT JSON matching this shape exactly:
+{
+  "postIdea": {
+    "topic": "<one-line topic, 6-10 words>",
+    "angle": "<the hook in one sentence — why this post is interesting>",
+    "draftMarkdown": "<a 150-220 word LinkedIn post draft, first person, plain prose. Use ONLY facts from the candidate's profile. Be specific. End with one open question that invites comments. NO emojis, NO hashtags, NO 'I'm looking for opportunities / between roles / open to work' language. The goal is making the candidate look thoughtful and worth following — visibility comes from value, not from asking for a job.>"
+  },
+  "profileNudge": {
+    "action": "<the one move this week, 6-12 words. Pick exactly one, and rotate variety across weeks: headline rewrite, About section rewrite, ask a specific past colleague for a recommendation, add missing core skills, add a Featured highlight, add a recent certification, customise URL, update banner, endorse 3 connections, etc.>",
+    "how": "<2-3 sentences tailored to THIS candidate, on exactly how to do it. Be concrete — quote the headline they should consider, name who to ask for a recommendation, list which skills to add.>"
+  },
+  "groupSuggestions": [
+    { "name": "<a real or realistic LinkedIn group name relevant to their role family and location>", "whyItFits": "<one short sentence>" },
+    { "name": "<another, different angle (industry vs. role vs. local)>", "whyItFits": "<one short sentence>" }
+  ],
+  "timingTip": {
+    "day": "<best day of the week to post for their industry — typically Tuesday/Wednesday/Thursday>",
+    "timeWindow": "<best time window in their local timezone, e.g. '9:00-10:30 AM IST'>",
+    "rationale": "<one short sentence>"
+  }
+}
+
+Rules:
+- Never invent facts about the candidate. Use only what's in the profile.
+- The post must read like a real person thinking out loud, not marketing copy.
+- The post must NOT mention layoffs, "between roles", or asking for a job.
+- groupSuggestions: prefer names that genuinely exist on LinkedIn; pick groups that fit the role family AND geography.
+- profileNudge.action: each week should feel different — rotate naturally based on the week date.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    return extractJSON<BoostBrief>(message);
   }
 }
 

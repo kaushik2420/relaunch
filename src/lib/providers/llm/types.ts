@@ -15,6 +15,7 @@ import type {
   TailoredResume,
   PivotBrief,
   CoverLetter,
+  BoostBrief,
 } from '@/lib/types';
 
 export interface LLMProvider {
@@ -84,4 +85,17 @@ export interface LLMProvider {
     targetRoleFamily?: string;
     pivotBrief?: PivotBrief;
   }): Promise<{ score: number; reason: string }>;
+
+  /**
+   * Generate this week's LinkedIn coaching brief — one tailored post
+   * idea, one profile-improvement nudge, two community suggestions, and
+   * a timing tip. Personalised from the candidate's résumé + target.
+   */
+  generateBoostBrief(input: {
+    profile: UserProfile;
+    roleFamilyLabel?: string;
+    pivotBrief?: PivotBrief;
+    searchQuery?: string;
+    weekStarting: string;
+  }): Promise<BoostBrief>;
 }
