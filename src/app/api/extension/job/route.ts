@@ -40,36 +40,53 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const rawUrl = new URL(req.url).searchParams.get("url");
-  if (!rawUrl) {
+  const params = new URL(req.url).searchParams;
+  const rawUrl = params.get("url");
+  const matchId = params.get("match_id");
+  if (!rawUrl && !matchId) {
     return NextResponse.json(
-      { error: "Missing `url` parameter." },
+      { error: "Missing `url` or `match_id` parameter." },
       { status: 400, headers: EXTENSION_CORS_HEADERS },
     );
   }
 
-  const cls = classifyAtsUrl(rawUrl);
   const admin = supabaseAdmin();
+  const COLUMNS =
+    "id, apply_url, ats, ats_id, job_title, company, match_percent, verify_score, tailored_resume_text, tailored_resume_pdf_url, cover_letter_text, cover_letter_pdf_url, why_this_role, summary, created_at";
 
-  // Lookup 1 — exact canonical URL
-  let { data: hit } = await admin
-    .from("job_matches")
-    .select(
-      "id, apply_url, ats, ats_id, job_title, company, match_percent, verify_score, tailored_resume_text, tailored_resume_pdf_url, cover_letter_text, cover_letter_pdf_url, why_this_role, summary, created_at",
-    )
-    .eq("user_id", auth.userId)
-    .eq("apply_url", cls.canonical)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let hit = null;
 
-  // Lookup 2 — by ATS + id (covers wrapper URLs)
-  if (!hit && cls.ats && cls.atsId) {
+  // Lookup 0 — explicit match_id (from the manual search fallback).
+  // User picked this row deliberately, so we trust it over URL guessing.
+  if (matchId) {
     const { data } = await admin
       .from("job_matches")
-      .select(
-        "id, apply_url, ats, ats_id, job_title, company, match_percent, verify_score, tailored_resume_text, tailored_resume_pdf_url, cover_letter_text, cover_letter_pdf_url, why_this_role, summary, created_at",
-      )
+      .select(COLUMNS)
+      .eq("user_id", auth.userId)
+      .eq("id", matchId)
+      .maybeSingle();
+    hit = data;
+  }
+
+  // Lookup 1 — exact canonical URL
+  let cls = rawUrl ? classifyAtsUrl(rawUrl) : null;
+  if (!hit && cls) {
+    const { data } = await admin
+      .from("job_matches")
+      .select(COLUMNS)
+      .eq("user_id", auth.userId)
+      .eq("apply_url", cls.canonical)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    hit = data;
+  }
+
+  // Lookup 2 — by ATS + id (covers wrapper URLs)
+  if (!hit && cls && cls.ats && cls.atsId) {
+    const { data } = await admin
+      .from("job_matches")
+      .select(COLUMNS)
       .eq("user_id", auth.userId)
       .eq("ats", cls.ats)
       .eq("ats_id", cls.atsId)
