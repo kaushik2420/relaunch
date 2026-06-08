@@ -100,29 +100,67 @@ export async function syncMatchesFromSheetAction(): Promise<{
 
   // Build job_matches rows. Skip rows missing the apply URL — they're
   // unusable for the extension since it matches by URL.
-  const rowsToWrite = matches
-    .filter((m) => m.jobUrl && m.jobUrl.startsWith("http"))
-    .map((m) => {
-      const cls = classifyAtsUrl(m.jobUrl);
-      return {
-        user_id: user.id,
-        apply_url: cls.canonical,
-        ats: cls.ats,
-        ats_id: cls.atsId,
-        job_title: m.role || "(untitled)",
-        company: m.company || "(unknown)",
-        match_percent: m.matchPercent ?? null,
-        tailored_resume_text: null,
-        tailored_resume_pdf_url: m.tailoredResumeUrl || null,
-        tailored_resume_doc_url: m.tailoredResumeDocUrl || null,
-        cover_letter_text: null,
-        cover_letter_pdf_url: m.coverLetterUrl || null,
-        cover_letter_doc_url: m.coverLetterDocUrl || null,
-        why_this_role: null,
-        summary: null,
-        updated_at: new Date().toISOString(),
-      };
+  //
+  // Dedup by canonical apply_url before sending to Postgres. The sheet
+  // dedupes on (company, role) which can let through multiple rows
+  // that all map to the same canonical URL (e.g. company spelled
+  // 'Acme' vs 'ACME Corp' for the same job). Postgres rejects an
+  // ON CONFLICT batch where the same conflict-target appears twice
+  // (code 21000), so we coalesce here. readMatches returns newest-
+  // first, so the first occurrence we keep IS the most recent.
+  const byUrl = new Map<
+    string,
+    {
+      user_id: string;
+      apply_url: string;
+      ats: string | null;
+      ats_id: string | null;
+      job_title: string;
+      company: string;
+      match_percent: number | null;
+      tailored_resume_text: string | null;
+      tailored_resume_pdf_url: string | null;
+      tailored_resume_doc_url: string | null;
+      cover_letter_text: string | null;
+      cover_letter_pdf_url: string | null;
+      cover_letter_doc_url: string | null;
+      why_this_role: string | null;
+      summary: string | null;
+      updated_at: string;
+    }
+  >();
+  let skipped = 0;
+  const now = new Date().toISOString();
+  for (const m of matches) {
+    if (!m.jobUrl || !m.jobUrl.startsWith("http")) {
+      skipped++;
+      continue;
+    }
+    const cls = classifyAtsUrl(m.jobUrl);
+    if (byUrl.has(cls.canonical)) {
+      skipped++;
+      continue;
+    }
+    byUrl.set(cls.canonical, {
+      user_id: user.id,
+      apply_url: cls.canonical,
+      ats: cls.ats,
+      ats_id: cls.atsId,
+      job_title: m.role || "(untitled)",
+      company: m.company || "(unknown)",
+      match_percent: m.matchPercent ?? null,
+      tailored_resume_text: null,
+      tailored_resume_pdf_url: m.tailoredResumeUrl || null,
+      tailored_resume_doc_url: m.tailoredResumeDocUrl || null,
+      cover_letter_text: null,
+      cover_letter_pdf_url: m.coverLetterUrl || null,
+      cover_letter_doc_url: m.coverLetterDocUrl || null,
+      why_this_role: null,
+      summary: null,
+      updated_at: now,
     });
+  }
+  const rowsToWrite = Array.from(byUrl.values());
 
   if (rowsToWrite.length === 0) {
     return { ok: true, inserted: 0, skipped: matches.length };
@@ -141,7 +179,7 @@ export async function syncMatchesFromSheetAction(): Promise<{
   return {
     ok: true,
     inserted: rowsToWrite.length,
-    skipped: matches.length - rowsToWrite.length,
+    skipped,
   };
 }
 
