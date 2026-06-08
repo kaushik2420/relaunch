@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import type { UserProfile } from '@/lib/types';
 import { ExtensionCard } from './ExtensionCard';
+import { isExtensionUnlocked } from '@/lib/extension-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,7 +77,9 @@ export default async function SettingsPage({
         <Link href="/billing" className="btn-soft mt-2 inline-flex">Manage subscription</Link>
       </div>
 
-      <ExtensionCard token={(row?.extension_token as string | null) ?? null} />
+      {isExtensionUnlocked(user.email) && (
+        <ExtensionCard token={(row?.extension_token as string | null) ?? null} />
+      )}
 
       <div className="card">
         <h2 className="text-xl font-bold">Privacy</h2>

@@ -3,6 +3,9 @@ import {
   authenticateExtension,
   EXTENSION_CORS_HEADERS,
 } from "@/lib/extension-auth";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { classifyAtsUrl } from "@/lib/ats-url";
+import type { UserProfile } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -17,18 +20,16 @@ export function OPTIONS() {
  * Look up the tailored Relaunch match for the job URL the user is
  * currently viewing.
  *
- * STUB: Returns 404 until migration 0010 (job_matches table) and the
- * daily-runner write are in place. The extension already handles 404
- * gracefully ("This page isn't a Relaunch match yet"), so connecting
- * the extension still works end-to-end via /me — users just won't see
- * per-match content until this is filled in.
+ * Lookup order (most specific → most permissive):
+ *   1. Exact `apply_url` match against the URL's canonical form
+ *      (protocol + host + path, lowercased, query-stripped).
+ *   2. Match by `(ats, ats_id)` — handles wrapper URLs like
+ *      `careers.datadoghq.com/detail/123/?gh_jid=123` which carry the
+ *      Greenhouse job id even though they live on a different host.
+ *   3. (Future) host+path prefix — useful for ATSes whose URLs are
+ *      stable but where we couldn't extract a stable id.
  *
- * Final implementation will:
- *  1. Parse the host + path from the `url` query param (ignore query
- *     strings, hashes, and case).
- *  2. Look up the most recent `job_matches` row for this user where
- *     normalize(apply_url) matches.
- *  3. Return { match, tailored, profile } per the spec.
+ * If multiple matches qualify (rare), the most recent wins.
  */
 export async function GET(req: NextRequest) {
   const auth = await authenticateExtension(req.headers.get("authorization"));
@@ -39,22 +40,84 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const url = new URL(req.url).searchParams.get("url");
-  if (!url) {
+  const rawUrl = new URL(req.url).searchParams.get("url");
+  if (!rawUrl) {
     return NextResponse.json(
       { error: "Missing `url` parameter." },
       { status: 400, headers: EXTENSION_CORS_HEADERS },
     );
   }
 
-  // Stub — per-match storage doesn't exist yet (migration 0010 + daily-
-  // runner write are tracked in the extension v1 ship checklist).
+  const cls = classifyAtsUrl(rawUrl);
+  const admin = supabaseAdmin();
+
+  // Lookup 1 — exact canonical URL
+  let { data: hit } = await admin
+    .from("job_matches")
+    .select(
+      "id, apply_url, ats, ats_id, job_title, company, match_percent, verify_score, tailored_resume_text, tailored_resume_pdf_url, cover_letter_text, cover_letter_pdf_url, why_this_role, summary, created_at",
+    )
+    .eq("user_id", auth.userId)
+    .eq("apply_url", cls.canonical)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Lookup 2 — by ATS + id (covers wrapper URLs)
+  if (!hit && cls.ats && cls.atsId) {
+    const { data } = await admin
+      .from("job_matches")
+      .select(
+        "id, apply_url, ats, ats_id, job_title, company, match_percent, verify_score, tailored_resume_text, tailored_resume_pdf_url, cover_letter_text, cover_letter_pdf_url, why_this_role, summary, created_at",
+      )
+      .eq("user_id", auth.userId)
+      .eq("ats", cls.ats)
+      .eq("ats_id", cls.atsId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    hit = data;
+  }
+
+  if (!hit) {
+    return NextResponse.json(
+      { error: "No match found for this URL." },
+      { status: 404, headers: EXTENSION_CORS_HEADERS },
+    );
+  }
+
+  // Shape into the contract the extension's widget expects.
+  const profile = (auth.profile ?? {}) as Partial<UserProfile>;
+  const links = profile.links ?? {};
   return NextResponse.json(
     {
-      error: "No match found for this URL.",
-      note:
-        "Per-match storage is still being wired in. The extension's /me endpoint works, so connection + profile data flow through; per-job tailored payloads will follow shortly.",
+      match: {
+        id: hit.id,
+        jobTitle: hit.job_title,
+        company: hit.company,
+        applyUrl: hit.apply_url,
+        matchPercent: hit.match_percent ?? 0,
+        verifyScore: hit.verify_score ?? 0,
+      },
+      tailored: {
+        resumeText: hit.tailored_resume_text,
+        resumePdfUrl: hit.tailored_resume_pdf_url,
+        coverLetterText: hit.cover_letter_text,
+        coverLetterPdfUrl: hit.cover_letter_pdf_url,
+        whyThisRole: hit.why_this_role,
+        summary: hit.summary,
+      },
+      profile: {
+        fullName: profile.fullName ?? null,
+        email: links.email ?? auth.email,
+        phone: links.phone ?? null,
+        location: profile.location ?? null,
+        linkedinUrl: links.linkedin ?? null,
+        githubUrl: links.github ?? null,
+        portfolioUrl: links.portfolio ?? null,
+        yearsExperience: profile.yearsExperience ?? null,
+      },
     },
-    { status: 404, headers: EXTENSION_CORS_HEADERS },
+    { headers: EXTENSION_CORS_HEADERS },
   );
 }

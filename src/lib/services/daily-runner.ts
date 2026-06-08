@@ -12,7 +12,8 @@ import {
   queryMatchesFamily,
   familyQuery,
 } from '@/lib/role-families';
-import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief } from '@/lib/types';
+import { classifyAtsUrl } from '@/lib/ats-url';
+import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief, TailoredResume, CoverLetter } from '@/lib/types';
 
 /**
  * Process a single user's daily run.
@@ -237,6 +238,17 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     await sheets().appendMatches(userRow.user_sheet_id, refreshToken, matches);
   }
 
+  // 4b. Persist each match to job_matches so the Chrome extension can
+  //     read tailored content on the apply page. Forward-only — no
+  //     backfill, so users only see matches generated after migration
+  //     0010 lands. Failure here is non-fatal (the sheet + email are
+  //     already out the door).
+  try {
+    await persistJobMatches(userRow.id, matches);
+  } catch (err) {
+    console.error('[daily-runner] persistJobMatches failed', err);
+  }
+
   // 5. Email digest
   await emailProvider().send({
     to: userRow.email,
@@ -397,4 +409,78 @@ export interface UserRow {
   pivot_enabled?: boolean | null;
   pivot_brief?: unknown;
   search_query?: string | null;
+}
+
+// ====================================================================
+// job_matches persistence — drives the Chrome extension's per-page lookup.
+// ====================================================================
+
+/** Plain-text serialization of a tailored résumé so the extension can
+ *  paste it into "paste your résumé" textareas. PDFs go via pdf_url. */
+function flattenTailoredResume(t: TailoredResume): string {
+  const parts: string[] = [];
+  if (t.summary) parts.push(t.summary);
+  if (t.highlightedSkills?.length) {
+    parts.push('Skills: ' + t.highlightedSkills.join(', '));
+  }
+  for (const exp of t.experienceBullets ?? []) {
+    parts.push(`\n${exp.title} — ${exp.company}`);
+    for (const b of exp.bullets ?? []) parts.push(`• ${b}`);
+  }
+  return parts.join('\n').trim();
+}
+
+/** Plain-text serialization of the cover letter for textarea fill. */
+function flattenCoverLetter(cl: CoverLetter): string {
+  return [cl.greeting, ...(cl.paragraphs ?? []), cl.closing, '— Your name']
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** Extension's "Why this role?" answer. We use the first body paragraph
+ *  of the cover letter — that's where the why-this-role pitch lives. */
+function deriveWhyThisRole(cl: CoverLetter | undefined): string | null {
+  if (!cl?.paragraphs?.length) return null;
+  return cl.paragraphs[0] ?? null;
+}
+
+async function persistJobMatches(
+  userId: string,
+  matches: TailoredJobMatch[],
+): Promise<void> {
+  if (!matches.length) return;
+  const rows = matches.map((m) => {
+    const cls = classifyAtsUrl(m.job.url);
+    const tailoredText = flattenTailoredResume(m.tailored);
+    const coverText = m.coverLetter
+      ? flattenCoverLetter(m.coverLetter)
+      : null;
+    return {
+      user_id: userId,
+      apply_url: cls.canonical,
+      ats: cls.ats,
+      ats_id: cls.atsId,
+      job_title: m.job.title,
+      company: m.job.company,
+      match_percent: m.matchPercent ?? null,
+      tailored_resume_text: tailoredText,
+      tailored_resume_pdf_url: m.tailoredResumeUrl ?? null,
+      tailored_resume_doc_url: m.tailoredResumeDocUrl ?? null,
+      cover_letter_text: coverText,
+      cover_letter_pdf_url: m.coverLetterUrl ?? null,
+      cover_letter_doc_url: m.coverLetterDocUrl ?? null,
+      why_this_role: deriveWhyThisRole(m.coverLetter),
+      summary: m.tailored.summary ?? null,
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  // Upsert on (user_id, apply_url) — re-running the daily runner for the
+  // same job updates the row instead of inserting a duplicate.
+  const { error } = await supabaseAdmin()
+    .from('job_matches')
+    .upsert(rows, { onConflict: 'user_id,apply_url' });
+  if (error) {
+    console.error('[daily-runner] upsert job_matches failed', error);
+  }
 }
