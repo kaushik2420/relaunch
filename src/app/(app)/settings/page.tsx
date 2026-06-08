@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import type { UserProfile } from '@/lib/types';
+import { ExtensionCard } from './ExtensionCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,7 @@ export default async function SettingsPage({
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect('/login');
   const { data: row } = await sb.from('users')
-    .select('email_frequency, email_time, google_email, user_sheet_id, profile, updated_at')
+    .select('email_frequency, email_time, google_email, user_sheet_id, profile, updated_at, extension_token')
     .eq('id', user.id).single();
 
   const profile = (row?.profile ?? null) as UserProfile | null;
@@ -74,6 +75,8 @@ export default async function SettingsPage({
         <h2 className="text-xl font-bold">Plan</h2>
         <Link href="/billing" className="btn-soft mt-2 inline-flex">Manage subscription</Link>
       </div>
+
+      <ExtensionCard token={(row?.extension_token as string | null) ?? null} />
 
       <div className="card">
         <h2 className="text-xl font-bold">Privacy</h2>
