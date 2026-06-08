@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import {
   generateExtensionTokenAction,
   revokeExtensionTokenAction,
+  syncMatchesFromSheetAction,
 } from "./extension-actions";
 
 /**
@@ -20,6 +21,24 @@ import {
 export function ExtensionCard({ token }: { token: string | null }) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [syncing, startSyncing] = useTransition();
+
+  function handleSync() {
+    setSyncResult(null);
+    startSyncing(async () => {
+      const r = await syncMatchesFromSheetAction();
+      if (r.ok) {
+        setSyncResult(
+          r.inserted === 0
+            ? "Nothing to sync — your Sheet looks empty."
+            : `Synced ${r.inserted} past matches. The extension can now find them on the apply page.`,
+        );
+      } else {
+        setSyncResult(r.reason ?? "Sync failed — please try again.");
+      }
+    });
+  }
 
   async function handleCopy() {
     if (!token) return;
@@ -118,6 +137,32 @@ export function ExtensionCard({ token }: { token: string | null }) {
             >
               Revoke
             </button>
+          </div>
+
+          {/* --- Sync past matches ---------------------------------- */}
+          <div className="mt-5 border-t border-line pt-4">
+            <p className="text-xs uppercase tracking-wider font-semibold text-ink-soft">
+              Sync past matches
+            </p>
+            <p className="mt-1.5 text-xs text-ink-soft leading-relaxed">
+              The extension only knows about matches generated after you
+              enabled it. Click below to pull your full match history from
+              your Relaunch Google Sheet so the extension finds every
+              past role too. PDFs come through; the cover-letter <em>text</em>
+              wasn&apos;t persisted historically so paste-fill of that field
+              won&apos;t work for old matches (PDF download still does).
+            </p>
+            <button
+              type="button"
+              onClick={handleSync}
+              disabled={syncing}
+              className="btn-soft text-xs mt-3"
+            >
+              {syncing ? "Syncing…" : "Sync past matches from Sheet"}
+            </button>
+            {syncResult && (
+              <p className="mt-2 text-xs text-ink-soft">{syncResult}</p>
+            )}
           </div>
         </>
       )}
