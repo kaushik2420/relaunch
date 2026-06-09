@@ -4,7 +4,6 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { signOutAction } from "../(auth)/actions";
 import { Logo } from "@/components/Logo";
 import { evaluateTrial } from "@/lib/services/billing";
-import { isBoostUnlocked } from "@/lib/services/boost-engine";
 import { PostHogIdentifier } from "@/components/PostHogIdentifier";
 
 /**
@@ -46,11 +45,6 @@ export default async function AppLayout({
     is_paying: row.is_paying ?? false,
     free_until: row.free_until as string,
   });
-
-  // Hide the Boost nav link until the public-launch gate opens. The
-  // /boost page itself also enforces this; the nav-level check just
-  // avoids a dead link surface for non-allowlisted users.
-  const boostUnlocked = isBoostUnlocked(user.email);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -105,11 +99,9 @@ export default async function AppLayout({
           <Link href="/upskill" className="hover:text-ink">
             Upskill
           </Link>
-          {boostUnlocked && (
-            <Link href="/boost" className="hover:text-ink">
-              Boost
-            </Link>
-          )}
+          <Link href="/boost" className="hover:text-ink">
+            Boost
+          </Link>
           <Link href="/feedback" className="hover:text-ink">
             Feedback
           </Link>
