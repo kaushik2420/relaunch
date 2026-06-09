@@ -48,34 +48,66 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Sanitize for ILIKE — escape % and _ so user-typed values aren't
-  // accidentally treated as wildcards.
-  const safe = q.replace(/[\\%_]/g, "\\$&");
+  // Sanitize ILIKE wildcards in the user's input so they're treated as
+  // literal characters (a user typing "100%" wouldn't accidentally hit
+  // "match anything").
+  const safe = q.replace(/[%_]/g, "\\$&");
   const pattern = `%${safe}%`;
 
-  const { data, error } = await supabaseAdmin()
-    .from("job_matches")
-    .select(
-      "id, apply_url, ats, ats_id, job_title, company, match_percent, created_at",
-    )
-    .eq("user_id", auth.userId)
-    .or(`job_title.ilike.${pattern},company.ilike.${pattern}`)
-    .order("match_percent", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  // Two separate .ilike() queries beats a single .or() call: the
+  // PostgREST .or() syntax is finicky about escaping when the value
+  // contains %, commas, or dots — the way ours always does — and was
+  // throwing a 500 in production. Two short queries are also still
+  // O(1) round-trips when run in parallel.
+  const admin = supabaseAdmin();
+  const COLUMNS =
+    "id, apply_url, ats, ats_id, job_title, company, match_percent, created_at";
+  const [byTitle, byCompany] = await Promise.all([
+    admin
+      .from("job_matches")
+      .select(COLUMNS)
+      .eq("user_id", auth.userId)
+      .ilike("job_title", pattern)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    admin
+      .from("job_matches")
+      .select(COLUMNS)
+      .eq("user_id", auth.userId)
+      .ilike("company", pattern)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ]);
 
-  if (error) {
-    console.error("[extension] search failed", error);
+  if (byTitle.error || byCompany.error) {
+    console.error("[extension] search failed", {
+      titleErr: byTitle.error,
+      companyErr: byCompany.error,
+    });
     return NextResponse.json(
       { error: "Search failed — please try again." },
       { status: 500, headers: EXTENSION_CORS_HEADERS },
     );
   }
 
+  // Merge, dedupe by id (title and company hits often overlap), sort
+  // by match_percent desc then created_at desc, then cap to limit.
+  const merged = new Map<string, (typeof byTitle.data extends (infer T)[] ? T : never)>();
+  for (const row of byTitle.data ?? []) merged.set(row.id, row);
+  for (const row of byCompany.data ?? []) {
+    if (!merged.has(row.id)) merged.set(row.id, row);
+  }
+  const sorted = Array.from(merged.values()).sort((a, b) => {
+    const am = a.match_percent ?? -1;
+    const bm = b.match_percent ?? -1;
+    if (bm !== am) return bm - am;
+    return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+  });
+
   return NextResponse.json(
     {
       query: q,
-      results: (data ?? []).map((r) => ({
+      results: sorted.slice(0, limit).map((r) => ({
         id: r.id,
         jobTitle: r.job_title,
         company: r.company,
