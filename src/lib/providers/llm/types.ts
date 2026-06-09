@@ -98,4 +98,22 @@ export interface LLMProvider {
     searchQuery?: string;
     weekStarting: string;
   }): Promise<BoostBrief>;
+
+  /**
+   * Answer an application question (e.g. "Why should we hire you?",
+   * "Tell us about a time you led a project") using the candidate's
+   * profile and the specific job they're applying to as context.
+   * Used by the Chrome extension's "Ask Claude" box.
+   *
+   * Should be a 2-4 paragraph, honest, specific answer in the
+   * candidate's voice. ~150-250 words.
+   */
+  answerApplicationQuestion(input: {
+    profile: UserProfile;
+    question: string;
+    jobTitle: string;
+    company: string;
+    summary?: string | null;
+    coverLetterText?: string | null;
+  }): Promise<{ answer: string }>;
 }

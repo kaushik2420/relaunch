@@ -460,6 +460,92 @@ Rules:
     });
     return extractJSON<BoostBrief>(message);
   }
+
+  // ----------------------------------------------------------------
+  // answerApplicationQuestion — freeform Q&A for application forms
+  // ----------------------------------------------------------------
+  async answerApplicationQuestion({
+    profile,
+    question,
+    jobTitle,
+    company,
+    summary,
+    coverLetterText,
+  }: {
+    profile: UserProfile;
+    question: string;
+    jobTitle: string;
+    company: string;
+    summary?: string | null;
+    coverLetterText?: string | null;
+  }): Promise<{ answer: string }> {
+    const experienceLines = (profile.experience ?? [])
+      .slice(0, 4)
+      .map((e) => {
+        const head = `- ${e.title} at ${e.company} (${e.from} – ${e.to})`;
+        const bullets = (e.bullets ?? [])
+          .slice(0, 3)
+          .map((b) => `  • ${b}`)
+          .join('\n');
+        return bullets ? `${head}\n${bullets}` : head;
+      })
+      .join('\n');
+
+    const tailoredContext = [
+      summary ? `Tailored summary for this role:\n${summary}` : null,
+      coverLetterText
+        ? `The cover letter we drafted for this role (use as a voice/tone reference, NOT to copy):\n${coverLetterText}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const prompt = `You are helping a job applicant draft an honest, specific answer to an application question. Write in the candidate's voice — first person, plain prose, no marketing fluff. Cite a real experience from their profile. Connect the answer to THIS specific role and company.
+
+CANDIDATE
+Name: ${profile.fullName}
+Seniority: ${profile.seniority}
+Years of experience: ${profile.yearsExperience}
+Location: ${profile.location ?? '(unknown)'}
+Top skills: ${(profile.skills ?? []).slice(0, 12).join(', ')}
+
+Recent experience:
+${experienceLines || '(no detailed experience on file)'}
+
+ROLE THEY'RE APPLYING TO
+${jobTitle} at ${company}
+
+${tailoredContext}
+
+APPLICATION QUESTION
+${question}
+
+INSTRUCTIONS
+- 150-250 words. 2-4 short paragraphs.
+- First-person, conversational, no buzzwords or hype.
+- Cite at least one specific experience or project from the profile. If the question asks for an example (e.g. "tell me about a time you…"), make it concrete.
+- Connect explicitly to the job title or company where natural.
+- If the candidate's profile doesn't directly cover what the question asks about (e.g. they haven't done X technology), be honest — frame transferable skills they DO have.
+- Never invent experience or projects that aren't in the profile.
+- Plain text only. No markdown, no headings, no bullet lists.
+- Do not greet, do not sign off.
+
+Now write the answer.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 800,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const answer = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim();
+
+    return { answer };
+  }
 }
 
 /**
