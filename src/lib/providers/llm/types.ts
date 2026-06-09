@@ -136,6 +136,23 @@ export interface LLMProvider {
     coverLetterText?: string | null;
     fields: SmartFillField[];
   }): Promise<{ values: Record<string, string | null> }>;
+
+  /**
+   * Generate tailored text for a match that was backfilled from the
+   * user's Sheet (where only PDF URLs were preserved — the text content
+   * was never persisted pre-migration). Returns summary, why-this-role,
+   * and full cover-letter text using just title + company as job
+   * context (no JD available for older matches).
+   */
+  enrichBackfilledMatch(input: {
+    profile: UserProfile;
+    jobTitle: string;
+    company: string;
+  }): Promise<{
+    summary: string;
+    whyThisRole: string;
+    coverLetterText: string;
+  }>;
 }
 
 export interface SmartFillField {

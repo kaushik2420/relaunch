@@ -647,6 +647,64 @@ Now output the JSON.`;
     }
     return { values: filtered };
   }
+
+  // ----------------------------------------------------------------
+  // enrichBackfilledMatch — generate text for sync'd-from-Sheet rows
+  // ----------------------------------------------------------------
+  async enrichBackfilledMatch({
+    profile,
+    jobTitle,
+    company,
+  }: {
+    profile: UserProfile;
+    jobTitle: string;
+    company: string;
+  }): Promise<{ summary: string; whyThisRole: string; coverLetterText: string }> {
+    const experienceLines = (profile.experience ?? [])
+      .slice(0, 4)
+      .map((e) => {
+        const head = `- ${e.title} at ${e.company} (${e.from} – ${e.to})`;
+        const bullets = (e.bullets ?? []).slice(0, 3).map((b) => `  • ${b}`).join('\n');
+        return bullets ? `${head}\n${bullets}` : head;
+      })
+      .join('\n');
+
+    const prompt = `You are tailoring application content for a candidate, working only from their profile and the job title + company (we don't have the job description). Be honest about that constraint — write generally about how their experience could apply.
+
+CANDIDATE
+Name: ${profile.fullName}
+Seniority: ${profile.seniority}
+Years of experience: ${profile.yearsExperience}
+Location: ${profile.location ?? '(unknown)'}
+Top skills: ${(profile.skills ?? []).slice(0, 12).join(', ')}
+
+Recent experience:
+${experienceLines || '(no detailed experience on file)'}
+
+ROLE
+${jobTitle} at ${company}
+
+Output STRICT JSON with this exact shape:
+{
+  "summary": "<2-3 sentence elevator pitch from the candidate's first-person perspective, tailored to why they fit a ${jobTitle} role at ${company}. Plain prose, no buzzwords.>",
+  "whyThisRole": "<a 60-100 word first-person answer to 'Why are you interested in this role?'. Specific. Cites at least one experience from the profile. Honest about not knowing the full JD — focuses on the skills + values the candidate brings.>",
+  "coverLetterText": "<a 220-320 word cover letter in plain prose. Open with a greeting ('Dear Hiring Team,'). Three short body paragraphs: (1) why this company/role interests them based on what they can infer, (2) the most relevant experience from their profile, (3) skills + values they bring. Close warmly. Sign off with the candidate's first name only. No markdown.>"
+}
+
+Rules:
+- Never invent experience, projects, or skills not in the profile.
+- First person throughout. Plain prose. No bullet lists.
+- Don't claim deep knowledge of ${company}'s specific products — speak to what ${jobTitle}s typically do at companies like that.
+- Don't mention layoffs or job-search status.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    return extractJSON<{ summary: string; whyThisRole: string; coverLetterText: string }>(message);
+  }
 }
 
 /**
