@@ -116,4 +116,34 @@ export interface LLMProvider {
     summary?: string | null;
     coverLetterText?: string | null;
   }): Promise<{ answer: string }>;
+
+  /**
+   * Smart-fill an application form. Given the structure of the form
+   * (each field's label, placeholder, type, options if it's a select),
+   * the candidate's profile, and the job context, return a suggested
+   * value for each fillable field — or null if Claude doesn't know
+   * what's being asked or refuses to fill it (e.g. sensitive question).
+   *
+   * Caller is responsible for stripping sensitive fields (EEO, salary,
+   * visa, etc) from the input BEFORE calling this — Claude is a second
+   * line of defence, not the first.
+   */
+  smartFillForm(input: {
+    profile: UserProfile;
+    jobTitle: string;
+    company: string;
+    summary?: string | null;
+    coverLetterText?: string | null;
+    fields: SmartFillField[];
+  }): Promise<{ values: Record<string, string | null> }>;
+}
+
+export interface SmartFillField {
+  id: string;
+  type: "text" | "email" | "tel" | "url" | "textarea" | "select" | "number";
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  options?: string[]; // for select
+  hint?: string; // any helper text near the field
 }

@@ -546,6 +546,107 @@ Now write the answer.`;
 
     return { answer };
   }
+
+  // ----------------------------------------------------------------
+  // smartFillForm — read form structure + return per-field values
+  // ----------------------------------------------------------------
+  async smartFillForm({
+    profile,
+    jobTitle,
+    company,
+    summary,
+    coverLetterText,
+    fields,
+  }: {
+    profile: UserProfile;
+    jobTitle: string;
+    company: string;
+    summary?: string | null;
+    coverLetterText?: string | null;
+    fields: { id: string; type: string; label: string; placeholder?: string; required?: boolean; options?: string[]; hint?: string }[];
+  }): Promise<{ values: Record<string, string | null> }> {
+    if (fields.length === 0) return { values: {} };
+
+    const experienceLines = (profile.experience ?? [])
+      .slice(0, 4)
+      .map((e) => {
+        const head = `- ${e.title} at ${e.company} (${e.from} – ${e.to})`;
+        const bullets = (e.bullets ?? []).slice(0, 3).map((b) => `  • ${b}`).join('\n');
+        return bullets ? `${head}\n${bullets}` : head;
+      })
+      .join('\n');
+
+    const fieldList = fields
+      .map((f) => {
+        const opts = f.options?.length ? `\n    options: [${f.options.slice(0, 30).map((o) => JSON.stringify(o)).join(', ')}]` : '';
+        const hint = f.hint ? `\n    hint: ${f.hint}` : '';
+        const req = f.required ? ' (required)' : '';
+        const placeholder = f.placeholder ? `\n    placeholder: ${f.placeholder}` : '';
+        return `  id: ${f.id}\n    type: ${f.type}${req}\n    label: ${f.label}${placeholder}${hint}${opts}`;
+      })
+      .join('\n');
+
+    const tailoredContext = [
+      summary ? `Tailored summary for this role:\n${summary}` : null,
+      coverLetterText ? `Cover letter we drafted for this role (voice/tone reference):\n${coverLetterText}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const prompt = `You are filling out a job application form on behalf of a candidate. For each field, return the best value to put in it based on the candidate's profile and the job. If a field asks something you can't answer confidently from the profile, return null — never make up facts.
+
+CANDIDATE
+Name: ${profile.fullName}
+Seniority: ${profile.seniority}
+Years of experience: ${profile.yearsExperience}
+Location: ${profile.location ?? '(unknown)'}
+Email: ${profile.links?.email ?? '(unknown)'}
+Phone: ${profile.links?.phone ?? '(unknown)'}
+LinkedIn: ${profile.links?.linkedin ?? '(unknown)'}
+GitHub: ${profile.links?.github ?? '(unknown)'}
+Portfolio: ${profile.links?.portfolio ?? '(unknown)'}
+Top skills: ${(profile.skills ?? []).slice(0, 15).join(', ')}
+
+Recent experience:
+${experienceLines || '(none)'}
+
+ROLE
+${jobTitle} at ${company}
+
+${tailoredContext}
+
+FORM FIELDS (fill these)
+${fieldList}
+
+RULES — read carefully:
+- Output STRICT JSON with shape: { "values": { "<id>": "<value or null>", ... } }. One entry per field id above. No additional keys.
+- For free-text / textarea fields like "Why are you interested?", "Cover letter", "Tell us about yourself": write 100-220 words in first person, citing a real experience from the profile. Plain text, no markdown.
+- For select fields: return one of the listed options VERBATIM, or null if no option fits cleanly.
+- For "current company" / "current employer": use the most recent company in the experience list.
+- For "current job title" / "current title" / "current role": use the most recent title.
+- For salary / current CTC / expected CTC / compensation / notice period / visa / sponsorship / availability date / EEO (race, gender, sex, disability, veteran, ethnicity): return null. These are personal decisions the candidate must answer themselves.
+- For "are you authorized to work" / "do you require sponsorship": return null.
+- For phone-format fields with country codes: include +91 if the profile phone is Indian; otherwise return as stored.
+- Never invent skills, projects, employers, or dates not present in the candidate's profile.
+- If unsure what a field is asking, return null.
+
+Now output the JSON.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const parsed = extractJSON<{ values: Record<string, string | null> }>(message);
+    // Defensive: ensure we only return values for fields we asked about.
+    const idSet = new Set(fields.map((f) => f.id));
+    const filtered: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(parsed.values ?? {})) {
+      if (idSet.has(k)) filtered[k] = v;
+    }
+    return { values: filtered };
+  }
 }
 
 /**
