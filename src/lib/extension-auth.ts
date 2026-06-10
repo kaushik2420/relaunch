@@ -1,5 +1,4 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { isExtensionUnlocked } from "@/lib/extension-gate";
 
 export interface ExtensionAuthOk {
   ok: true;
@@ -66,19 +65,6 @@ export async function authenticateExtension(
       ok: false,
       status: 401,
       message: "Account is paused. Reach out to hello@get-relaunch.com.",
-    };
-  }
-
-  // Allowlist gate — the extension feature is beta-only for now. We
-  // still validate the token first (so we don't leak which emails are
-  // allowlisted) but reject with a generic "feature unavailable"
-  // message if the account isn't in the allowlist.
-  if (!isExtensionUnlocked(data.email as string)) {
-    return {
-      ok: false,
-      status: 401,
-      message:
-        "The Relaunch Chrome extension is in private beta. Reach out at hello@get-relaunch.com if you'd like access.",
     };
   }
 
