@@ -9,6 +9,7 @@ import { getTodayQuote } from '@/lib/quotes';
 import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 import { sheets } from '@/lib/providers/sheets';
 import { decrypt } from '@/lib/crypto';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 export const dynamic = 'force-dynamic'; // never cache — Sheet content changes every day
@@ -52,6 +53,17 @@ export default async function DashboardPage({
   }
 
   const stats = computeStats(matches, row?.profile, !!row?.user_sheet_id);
+
+  // Total job_matches rows for this user — tells us how big the
+  // "see all" pool is (top 5 tailored + verified + discovered).
+  // Cheap COUNT query against the indexed (user_id) column.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: matchesLast24h } = await supabaseAdmin()
+    .from('job_matches')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .gte('created_at', since);
+  const totalPool = matchesLast24h ?? 0;
   // Greeting follows the user's preferred timezone so "Good morning" still
   // feels right when they open the app from anywhere.
   const tz = (row?.timezone as string | null) || 'Asia/Kolkata';
@@ -75,6 +87,27 @@ export default async function DashboardPage({
           {row?.cohort === 'founder' ? `Founding member #${row?.signup_position} 🌱` : `Early member #${row?.signup_position}`}
         </div>
       </header>
+
+      {totalPool > matches.length && (
+        <Link
+          href="/all-matches"
+          className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-brand-100 bg-brand-50 px-5 py-4 transition-colors hover:bg-brand-100"
+        >
+          <div>
+            <div className="text-sm font-semibold text-brand-900">
+              ✨ {totalPool} matches in your full pool today
+            </div>
+            <div className="mt-0.5 text-xs text-brand-700">
+              Your inbox shows the top 5 tailored picks. The rest are
+              verified or discovered roles you can browse and tailor
+              on the apply page.
+            </div>
+          </div>
+          <div className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-brand-700 ring-1 ring-brand-100">
+            See all →
+          </div>
+        </Link>
+      )}
 
       <div className="grid gap-4 md:grid-cols-4 mb-6">
         <Stat
