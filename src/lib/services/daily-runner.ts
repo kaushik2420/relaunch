@@ -85,12 +85,16 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     return { matchesFound: 0, emailed: 0, providers: lastFetchSummary() };
   }
 
-  // 2b. Embedding rank is fast but coarse. Take the top 10 candidates,
+  // 2b. Embedding rank is fast but coarse. Take the top 25 candidates,
   // then ask Claude (Haiku) to verify each is actually about the kind of
   // role this user wants. Drops obvious mismatches before we spend
-  // Sonnet tokens tailoring them. Falls back to the embedding ranking
-  // if verification errors or filters everything out.
-  const shortlist = ranked.slice(0, 10);
+  // Sonnet tokens tailoring them.
+  //
+  // Why 25 not 10: at 10 the LLM-verified pool was producing only
+  // 5-8 matches surfaced per user per day. Users have asked for more
+  // to apply to. Haiku verify calls are ~$0.0005 each, so 25 per user
+  // per day = ~$0.01/user/day = ~$0.30/user/month.
+  const shortlist = ranked.slice(0, 25);
   const verified = await Promise.all(
     shortlist.map(async (r) => {
       try {
@@ -141,8 +145,8 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   //    (d) draft an InMail addressed to the referrer (or generic if none)
   // Each step is wrapped in try/catch — a single failure shouldn't kill
   // the whole match. Better to ship a partial row than nothing.
-  const matches: TailoredJobMatch[] = await Promise.all(
-    top.map(async ({ job, matchPercent, reasons }) => {
+  const matches: (TailoredJobMatch & { verifyScore?: number | null })[] = await Promise.all(
+    top.map(async ({ job, matchPercent, reasons, verifyScore }) => {
       // (a) Resume tailoring + cover letter — independent Claude calls,
       //     run them together. tailorResume is required (throw kills the
       //     match); a cover-letter failure just drops the letter.
@@ -237,6 +241,7 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
         referrers,
         connectionsSearchUrl,
         inmailDraft,
+        verifyScore,
       };
     })
   );
@@ -269,10 +274,35 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
       rest.map((r) => ({
         job: r.job,
         matchPercent: r.matchPercent,
+        verifyScore: r.verifyScore,
       })),
     );
   } catch (err) {
     console.error('[daily-runner] persistMatchSummaries failed', err);
+  }
+
+  // 4d. The "long tail" — jobs that the embedding ranker liked but that
+  // we didn't have budget to LLM-verify (ranks 26..50 of the full
+  // ranked list). Filtered to >=35% match so the bottom of the pool
+  // doesn't surface obvious garbage. verify_score stays null so the
+  // dashboard can chip these as "Discovered" rather than "Verified".
+  try {
+    const longTail = ranked
+      .slice(25, 50)
+      .filter((r) => r.matchPercent >= 35);
+    await persistMatchSummaries(
+      userRow.id,
+      longTail.map((r) => ({
+        job: r.job,
+        matchPercent: r.matchPercent,
+        verifyScore: null,
+      })),
+    );
+    console.log(
+      `[daily-runner] long-tail pool persisted: ${longTail.length} jobs (ranks 26-50, >=35%)`,
+    );
+  } catch (err) {
+    console.error('[daily-runner] persistLongTail failed', err);
   }
 
   // 5. Email digest
@@ -472,7 +502,7 @@ function deriveWhyThisRole(cl: CoverLetter | undefined): string | null {
 
 async function persistJobMatches(
   userId: string,
-  matches: TailoredJobMatch[],
+  matches: (TailoredJobMatch & { verifyScore?: number | null })[],
 ): Promise<void> {
   if (!matches.length) return;
   const rows = matches.map((m) => {
@@ -489,6 +519,7 @@ async function persistJobMatches(
       job_title: m.job.title,
       company: m.job.company,
       match_percent: m.matchPercent ?? null,
+      verify_score: m.verifyScore ?? null,
       tailored_resume_text: tailoredText,
       tailored_resume_pdf_url: m.tailoredResumeUrl ?? null,
       tailored_resume_doc_url: m.tailoredResumeDocUrl ?? null,
@@ -525,7 +556,11 @@ async function persistJobMatches(
  */
 async function persistMatchSummaries(
   userId: string,
-  summaries: { job: JobPosting; matchPercent: number }[],
+  summaries: {
+    job: JobPosting;
+    matchPercent: number;
+    verifyScore?: number | null;
+  }[],
 ): Promise<void> {
   if (!summaries.length) return;
 
@@ -562,6 +597,7 @@ async function persistMatchSummaries(
         job_title: s.job.title,
         company: s.job.company,
         match_percent: s.matchPercent ?? null,
+        verify_score: s.verifyScore ?? null,
         // Text + PDF columns intentionally null — these are summary-only.
         tailored_resume_text: null,
         tailored_resume_pdf_url: null,

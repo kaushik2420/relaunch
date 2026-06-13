@@ -11,6 +11,7 @@ interface MatchRow {
   job_title: string;
   company: string;
   match_percent: number | null;
+  verify_score: number | null;
   tailored_resume_text: string | null;
   cover_letter_text: string | null;
   created_at: string;
@@ -34,7 +35,7 @@ export default async function AllMatchesPage() {
   const { data: rows } = await admin
     .from("job_matches")
     .select(
-      "id, apply_url, job_title, company, match_percent, tailored_resume_text, cover_letter_text, created_at",
+      "id, apply_url, job_title, company, match_percent, verify_score, tailored_resume_text, cover_letter_text, created_at",
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
@@ -110,17 +111,21 @@ function MatchRowCard({ match }: { match: MatchRow }) {
           </div>
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-2 text-xs">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
         {isTailored ? (
           <span className="inline-flex items-center rounded-full bg-success-soft px-2 py-0.5 font-semibold text-success">
             ✓ Tailored
           </span>
-        ) : (
+        ) : match.verify_score != null ? (
           <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">
-            Summary only — tailor on the apply page
+            ✓ Verified · tailor on the apply page
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-full bg-cream-100 px-2 py-0.5 font-semibold text-ink-soft">
+            Discovered — worth a look
           </span>
         )}
-        <span className="text-ink-mute">View role →</span>
+        <span className="text-ink-mute ml-auto">View role →</span>
       </div>
     </a>
   );
