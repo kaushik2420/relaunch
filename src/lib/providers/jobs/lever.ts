@@ -2,6 +2,7 @@ import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
 import { defaultLeverBoards } from '@/lib/ats-companies';
+import { findRoleFamily } from '@/lib/role-families';
 
 /**
  * Lever — same pattern as the Greenhouse provider, just a different
@@ -25,7 +26,14 @@ export class LeverProvider implements JobProvider {
       `[lever] scanning ${boards.length} boards (source: ${envBoards.length ? 'env override' : 'curated default'})`,
     );
 
+    // Per-board diagnostic: how many slugs returned valid responses,
+    // how many raw jobs came back, how many passed the filter. Logged
+    // in aggregate so we can spot bad slugs without spamming.
+    let httpOk = 0;
+    let rawJobs = 0;
     const all: JobPosting[] = [];
+    const failedSlugs: string[] = [];
+
     await Promise.all(
       boards.map(async (slug) => {
         try {
@@ -33,21 +41,30 @@ export class LeverProvider implements JobProvider {
             `https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`,
             { next: { revalidate: 3600 } },
           );
-          if (!res.ok) return;
+          if (!res.ok) {
+            failedSlugs.push(`${slug}=${res.status}`);
+            return;
+          }
+          httpOk++;
           const postings: LeverPosting[] = await res.json();
+          rawJobs += postings.length;
           for (const p of postings) {
             if (!matchesQuery(p, q)) continue;
             all.push(mapLever(slug, p));
           }
-        } catch {
-          /* swallow single-board failure */
+        } catch (err) {
+          failedSlugs.push(`${slug}=ERR`);
         }
       }),
     );
 
-    const sliced = all.slice(0, q.limit ?? 50);
-    console.log(`[lever] ${boards.length} boards → ${sliced.length} jobs after filter`);
-    return sliced;
+    console.log(
+      `[lever] ${httpOk}/${boards.length} boards reachable · ${rawJobs} raw jobs · ${all.length} matched query+location`,
+    );
+    if (failedSlugs.length > 0) {
+      console.log(`[lever] failed slugs: ${failedSlugs.join(', ')}`);
+    }
+    return all.slice(0, q.limit ?? 50);
   }
 }
 
@@ -70,20 +87,18 @@ interface LeverPosting {
 }
 
 function matchesQuery(p: LeverPosting, q: JobSearchQuery): boolean {
+  // Two-pass keyword match (same shape as Greenhouse): exact query
+  // first, then fall back to role-family signal words so users with
+  // quirky résumé titles still see real matches at these companies.
   const needle = q.query.toLowerCase();
   const title = (p.text ?? '').toLowerCase();
   const dept = (p.categories.department ?? '').toLowerCase();
   const team = (p.categories.team ?? '').toLowerCase();
   const desc = (p.descriptionPlain ?? p.description ?? '').toLowerCase();
-  if (
-    needle &&
-    !title.includes(needle) &&
-    !dept.includes(needle) &&
-    !team.includes(needle) &&
-    !desc.includes(needle)
-  ) {
-    return false;
-  }
+  const haystack = `${title} ${dept} ${team} ${desc}`;
+  const exactHit = needle && haystack.includes(needle);
+  const familyHit = q.roleFamily ? matchesFamily(haystack, q.roleFamily) : false;
+  if (needle && !exactHit && !familyHit) return false;
 
   if (q.locations.length > 0) {
     const haystack = [
@@ -99,6 +114,11 @@ function matchesQuery(p: LeverPosting, q: JobSearchQuery): boolean {
     if (!ok) return false;
   }
   return true;
+}
+
+function matchesFamily(haystack: string, family: string): boolean {
+  const signals = findRoleFamily(family)?.greenhouseSignals ?? [];
+  return signals.some((s) => haystack.includes(s));
 }
 
 function mapLever(slug: string, p: LeverPosting): JobPosting {

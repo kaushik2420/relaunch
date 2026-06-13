@@ -2,6 +2,7 @@ import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
 import { defaultWorkableBoards } from '@/lib/ats-companies';
+import { findRoleFamily } from '@/lib/role-families';
 
 /**
  * Workable — public board feed per account slug.
@@ -21,7 +22,11 @@ export class WorkableProvider implements JobProvider {
     const boards = envBoards.length > 0 ? envBoards : defaultWorkableBoards();
     console.log(`[workable] scanning ${boards.length} boards`);
 
+    let httpOk = 0;
+    let rawJobs = 0;
     const all: JobPosting[] = [];
+    const failedSlugs: string[] = [];
+
     await Promise.all(
       boards.map(async (slug) => {
         try {
@@ -29,21 +34,30 @@ export class WorkableProvider implements JobProvider {
             `https://apply.workable.com/api/v3/accounts/${encodeURIComponent(slug)}/jobs?state=published`,
             { next: { revalidate: 3600 } },
           );
-          if (!res.ok) return;
+          if (!res.ok) {
+            failedSlugs.push(`${slug}=${res.status}`);
+            return;
+          }
+          httpOk++;
           const data: { results?: WorkableJob[] } = await res.json();
+          rawJobs += data.results?.length ?? 0;
           for (const j of data.results ?? []) {
             if (!matchesQuery(j, q)) continue;
             all.push(mapWorkable(slug, j));
           }
         } catch {
-          /* skip on per-board failure */
+          failedSlugs.push(`${slug}=ERR`);
         }
       }),
     );
 
-    const sliced = all.slice(0, q.limit ?? 50);
-    console.log(`[workable] ${boards.length} boards → ${sliced.length} after filter`);
-    return sliced;
+    console.log(
+      `[workable] ${httpOk}/${boards.length} boards reachable · ${rawJobs} raw jobs · ${all.length} matched query+location`,
+    );
+    if (failedSlugs.length > 0) {
+      console.log(`[workable] failed slugs: ${failedSlugs.join(', ')}`);
+    }
+    return all.slice(0, q.limit ?? 50);
   }
 }
 
@@ -65,7 +79,10 @@ function matchesQuery(j: WorkableJob, q: JobSearchQuery): boolean {
   const needle = q.query.toLowerCase();
   const title = (j.title ?? '').toLowerCase();
   const desc = (j.description ?? '').toLowerCase();
-  if (needle && !title.includes(needle) && !desc.includes(needle)) return false;
+  const haystack = `${title} ${desc}`;
+  const exactHit = needle && haystack.includes(needle);
+  const familyHit = q.roleFamily ? matchesFamily(haystack, q.roleFamily) : false;
+  if (needle && !exactHit && !familyHit) return false;
 
   if (q.locations.length > 0) {
     const city = (j.location?.city ?? '').toLowerCase();
@@ -79,6 +96,11 @@ function matchesQuery(j: WorkableJob, q: JobSearchQuery): boolean {
     if (!ok) return false;
   }
   return true;
+}
+
+function matchesFamily(haystack: string, family: string): boolean {
+  const signals = findRoleFamily(family)?.greenhouseSignals ?? [];
+  return signals.some((s) => haystack.includes(s));
 }
 
 function mapWorkable(slug: string, j: WorkableJob): JobPosting {

@@ -2,6 +2,7 @@ import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
 import { defaultSmartRecruitersBoards } from '@/lib/ats-companies';
+import { findRoleFamily } from '@/lib/role-families';
 
 /**
  * SmartRecruiters — public postings endpoint per company.
@@ -21,7 +22,11 @@ export class SmartRecruitersProvider implements JobProvider {
     const boards = envBoards.length > 0 ? envBoards : defaultSmartRecruitersBoards();
     console.log(`[smartrecruiters] scanning ${boards.length} boards`);
 
+    let httpOk = 0;
+    let rawJobs = 0;
     const all: JobPosting[] = [];
+    const failedSlugs: string[] = [];
+
     await Promise.all(
       boards.map(async (slug) => {
         try {
@@ -29,21 +34,30 @@ export class SmartRecruitersProvider implements JobProvider {
             `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(slug)}/postings?limit=100`,
             { next: { revalidate: 3600 } },
           );
-          if (!res.ok) return;
+          if (!res.ok) {
+            failedSlugs.push(`${slug}=${res.status}`);
+            return;
+          }
+          httpOk++;
           const data: { content?: SmartRecPosting[] } = await res.json();
+          rawJobs += data.content?.length ?? 0;
           for (const p of data.content ?? []) {
             if (!matchesQuery(p, q)) continue;
             all.push(mapSmartRec(slug, p));
           }
         } catch {
-          /* skip */
+          failedSlugs.push(`${slug}=ERR`);
         }
       }),
     );
 
-    const sliced = all.slice(0, q.limit ?? 50);
-    console.log(`[smartrecruiters] ${boards.length} boards → ${sliced.length} after filter`);
-    return sliced;
+    console.log(
+      `[smartrecruiters] ${httpOk}/${boards.length} boards reachable · ${rawJobs} raw jobs · ${all.length} matched query+location`,
+    );
+    if (failedSlugs.length > 0) {
+      console.log(`[smartrecruiters] failed slugs: ${failedSlugs.join(', ')}`);
+    }
+    return all.slice(0, q.limit ?? 50);
   }
 }
 
@@ -67,8 +81,10 @@ function matchesQuery(p: SmartRecPosting, q: JobSearchQuery): boolean {
   const dept = (p.department?.label ?? '').toLowerCase();
   const fn = (p.function?.label ?? '').toLowerCase();
   const desc = (p.jobAd?.sections?.jobDescription?.text ?? '').toLowerCase();
-  if (needle && !title.includes(needle) && !dept.includes(needle) && !fn.includes(needle) && !desc.includes(needle))
-    return false;
+  const haystack = `${title} ${dept} ${fn} ${desc}`;
+  const exactHit = needle && haystack.includes(needle);
+  const familyHit = q.roleFamily ? matchesFamily(haystack, q.roleFamily) : false;
+  if (needle && !exactHit && !familyHit) return false;
 
   if (q.locations.length > 0) {
     const haystack = `${p.location?.city ?? ''} ${p.location?.region ?? ''} ${p.location?.country ?? ''}`.toLowerCase();
@@ -79,6 +95,11 @@ function matchesQuery(p: SmartRecPosting, q: JobSearchQuery): boolean {
     if (!ok) return false;
   }
   return true;
+}
+
+function matchesFamily(haystack: string, family: string): boolean {
+  const signals = findRoleFamily(family)?.greenhouseSignals ?? [];
+  return signals.some((s) => haystack.includes(s));
 }
 
 function mapSmartRec(slug: string, p: SmartRecPosting): JobPosting {

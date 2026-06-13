@@ -2,6 +2,7 @@ import { serverConfig } from '@/lib/config';
 import type { JobPosting } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
 import { defaultRecruiteeBoards } from '@/lib/ats-companies';
+import { findRoleFamily } from '@/lib/role-families';
 
 /**
  * Recruitee — public offers feed at the company's own subdomain.
@@ -22,7 +23,11 @@ export class RecruiteeProvider implements JobProvider {
     const boards = envBoards.length > 0 ? envBoards : defaultRecruiteeBoards();
     console.log(`[recruitee] scanning ${boards.length} boards`);
 
+    let httpOk = 0;
+    let rawJobs = 0;
     const all: JobPosting[] = [];
+    const failedSlugs: string[] = [];
+
     await Promise.all(
       boards.map(async (slug) => {
         try {
@@ -30,21 +35,30 @@ export class RecruiteeProvider implements JobProvider {
             `https://${encodeURIComponent(slug)}.recruitee.com/api/offers/`,
             { next: { revalidate: 3600 } },
           );
-          if (!res.ok) return;
+          if (!res.ok) {
+            failedSlugs.push(`${slug}=${res.status}`);
+            return;
+          }
+          httpOk++;
           const data: { offers?: RecruiteeOffer[] } = await res.json();
+          rawJobs += data.offers?.length ?? 0;
           for (const o of data.offers ?? []) {
             if (!matchesQuery(o, q)) continue;
             all.push(mapRecruitee(slug, o));
           }
         } catch {
-          /* skip */
+          failedSlugs.push(`${slug}=ERR`);
         }
       }),
     );
 
-    const sliced = all.slice(0, q.limit ?? 50);
-    console.log(`[recruitee] ${boards.length} boards → ${sliced.length} after filter`);
-    return sliced;
+    console.log(
+      `[recruitee] ${httpOk}/${boards.length} boards reachable · ${rawJobs} raw jobs · ${all.length} matched query+location`,
+    );
+    if (failedSlugs.length > 0) {
+      console.log(`[recruitee] failed slugs: ${failedSlugs.join(', ')}`);
+    }
+    return all.slice(0, q.limit ?? 50);
   }
 }
 
@@ -70,7 +84,10 @@ function matchesQuery(o: RecruiteeOffer, q: JobSearchQuery): boolean {
   const title = (o.title ?? '').toLowerCase();
   const desc = (o.description ?? '').toLowerCase();
   const reqs = (o.requirements ?? '').toLowerCase();
-  if (needle && !title.includes(needle) && !desc.includes(needle) && !reqs.includes(needle)) return false;
+  const haystack = `${title} ${desc} ${reqs}`;
+  const exactHit = needle && haystack.includes(needle);
+  const familyHit = q.roleFamily ? matchesFamily(haystack, q.roleFamily) : false;
+  if (needle && !exactHit && !familyHit) return false;
 
   if (q.locations.length > 0) {
     const haystack = `${o.city ?? ''} ${o.country ?? ''} ${o.location ?? ''}`.toLowerCase();
@@ -81,6 +98,11 @@ function matchesQuery(o: RecruiteeOffer, q: JobSearchQuery): boolean {
     if (!ok) return false;
   }
   return true;
+}
+
+function matchesFamily(haystack: string, family: string): boolean {
+  const signals = findRoleFamily(family)?.greenhouseSignals ?? [];
+  return signals.some((s) => haystack.includes(s));
 }
 
 function mapRecruitee(slug: string, o: RecruiteeOffer): JobPosting {
