@@ -5,12 +5,24 @@ import { AdzunaProvider } from './adzuna';
 import { JoobleProvider } from './jooble';
 import { GreenhouseProvider } from './greenhouse';
 import { JSearchProvider } from './jsearch';
+import { RemotiveProvider } from './remotive';
+import { TheMuseProvider } from './themuse';
+import { LeverProvider } from './lever';
+import { WorkableProvider } from './workable';
+import { SmartRecruitersProvider } from './smartrecruiters';
+import { RecruiteeProvider } from './recruitee';
 
 const REGISTRY: Record<string, () => JobProvider> = {
   adzuna: () => new AdzunaProvider(),
   jooble: () => new JoobleProvider(),
   greenhouse: () => new GreenhouseProvider(),
   jsearch: () => new JSearchProvider(),
+  remotive: () => new RemotiveProvider(),
+  themuse: () => new TheMuseProvider(),
+  lever: () => new LeverProvider(),
+  workable: () => new WorkableProvider(),
+  smartrecruiters: () => new SmartRecruitersProvider(),
+  recruitee: () => new RecruiteeProvider(),
 };
 
 let _providers: JobProvider[] | undefined;

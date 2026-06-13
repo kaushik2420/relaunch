@@ -13,7 +13,7 @@ import {
   familyQuery,
 } from '@/lib/role-families';
 import { classifyAtsUrl } from '@/lib/ats-url';
-import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief, TailoredResume, CoverLetter } from '@/lib/types';
+import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief, TailoredResume, CoverLetter, JobPosting } from '@/lib/types';
 
 /**
  * Process a single user's daily run.
@@ -107,7 +107,10 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
       }
     }),
   );
-  const passed = verified.filter((r) => r.verifyScore >= 40);
+  // Lower threshold to 30 (from 40) — keeps marginal-but-plausible
+  // matches in the pool. The user sees them in the /all-matches view;
+  // only the top 5 still get full tailoring in the email digest.
+  const passed = verified.filter((r) => r.verifyScore >= 30);
   const usable = passed.length ? passed : verified;
   usable.sort(
     (a, b) =>
@@ -115,6 +118,11 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
       (a.matchPercent + a.verifyScore) / 2,
   );
   const top = usable.slice(0, 5);
+  // Everything beyond the top 5 — persisted to job_matches as
+  // summary-only rows (no tailored text). The dashboard surfaces them,
+  // and the user can enrich any one via the extension or a dashboard
+  // 'Tailor this' action.
+  const rest = usable.slice(5);
   console.log(
     `[daily-runner] verified shortlist: kept ${passed.length}/${shortlist.length}, top scores ${top.map((t) => `${t.matchPercent}/${t.verifyScore}`).join(', ')}`,
   );
@@ -247,6 +255,24 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     await persistJobMatches(userRow.id, matches);
   } catch (err) {
     console.error('[daily-runner] persistJobMatches failed', err);
+  }
+
+  // 4c. ALSO persist the rest of today's ranked matches (those ranked
+  //     6..N that passed verify) as summary-only rows. No tailored
+  //     text, just URL + title + company + match score. The dashboard
+  //     "All matches" view surfaces these so users have a bigger pool
+  //     to scan, and they can enrich any one via the extension or the
+  //     in-dashboard "Tailor this match" button.
+  try {
+    await persistMatchSummaries(
+      userRow.id,
+      rest.map((r) => ({
+        job: r.job,
+        matchPercent: r.matchPercent,
+      })),
+    );
+  } catch (err) {
+    console.error('[daily-runner] persistMatchSummaries failed', err);
   }
 
   // 5. Email digest
@@ -482,5 +508,78 @@ async function persistJobMatches(
     .upsert(rows, { onConflict: 'user_id,apply_url' });
   if (error) {
     console.error('[daily-runner] upsert job_matches failed', error);
+  }
+}
+
+/**
+ * Persist matches that we haven't paid to tailor (ranked 6..N). Same
+ * shape as persistJobMatches but with the text + PDF fields null. The
+ * dashboard's "All today's matches" view surfaces these, and the user
+ * can enrich any one on demand via the extension or a 'Tailor this'
+ * action. Dedup-safe — upsert on (user_id, apply_url) means re-running
+ * the daily run for the same job doesn't blow away an already-tailored
+ * row (the existing text fields are preserved on conflict because we
+ * only set them to null in the INSERT path; on UPDATE we... actually
+ * Supabase upsert overwrites by default, so we have to skip rows
+ * where the canonical URL is already present in the tailored set).
+ */
+async function persistMatchSummaries(
+  userId: string,
+  summaries: { job: JobPosting; matchPercent: number }[],
+): Promise<void> {
+  if (!summaries.length) return;
+
+  // Dedup by canonical URL within this batch (rare but safe).
+  const byUrl = new Map<string, (typeof summaries)[number]>();
+  for (const s of summaries) {
+    const c = classifyAtsUrl(s.job.url).canonical;
+    if (!byUrl.has(c)) byUrl.set(c, s);
+  }
+
+  // Skip any URL we've already tailored for this user — we don't want
+  // to overwrite a tailored row with nulls. Cheap pre-check.
+  const canonicals = Array.from(byUrl.keys());
+  const { data: existing } = await supabaseAdmin()
+    .from('job_matches')
+    .select('apply_url, tailored_resume_text')
+    .eq('user_id', userId)
+    .in('apply_url', canonicals);
+  const tailoredAlready = new Set(
+    (existing ?? [])
+      .filter((r) => (r.tailored_resume_text as string | null) != null)
+      .map((r) => r.apply_url as string),
+  );
+
+  const rows = Array.from(byUrl.entries())
+    .filter(([url]) => !tailoredAlready.has(url))
+    .map(([url, s]) => {
+      const cls = classifyAtsUrl(s.job.url);
+      return {
+        user_id: userId,
+        apply_url: cls.canonical,
+        ats: cls.ats,
+        ats_id: cls.atsId,
+        job_title: s.job.title,
+        company: s.job.company,
+        match_percent: s.matchPercent ?? null,
+        // Text + PDF columns intentionally null — these are summary-only.
+        tailored_resume_text: null,
+        tailored_resume_pdf_url: null,
+        tailored_resume_doc_url: null,
+        cover_letter_text: null,
+        cover_letter_pdf_url: null,
+        cover_letter_doc_url: null,
+        why_this_role: null,
+        summary: null,
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+  if (rows.length === 0) return;
+  const { error } = await supabaseAdmin()
+    .from('job_matches')
+    .upsert(rows, { onConflict: 'user_id,apply_url' });
+  if (error) {
+    console.error('[daily-runner] upsert summary job_matches failed', error);
   }
 }

@@ -34,12 +34,18 @@ const serverSchema = z.object({
   OPENAI_MODEL_QUALITY: z.string().default('gpt-4o'),
 
   // Jobs
-  JOB_PROVIDERS: z.string().default('adzuna,jooble,greenhouse'),
+  JOB_PROVIDERS: z
+    .string()
+    .default('adzuna,jooble,greenhouse,lever,workable,smartrecruiters,recruitee,themuse,remotive'),
   ADZUNA_APP_ID: z.string().optional(),
   ADZUNA_APP_KEY: z.string().optional(),
   JOOBLE_API_KEY: z.string().optional(),
   GREENHOUSE_BOARDS: z.string().default(''),
   JSEARCH_API_KEY: z.string().optional(),
+  LEVER_BOARDS: z.string().default(''),
+  WORKABLE_BOARDS: z.string().default(''),
+  SMARTRECRUITERS_BOARDS: z.string().default(''),
+  RECRUITEE_BOARDS: z.string().default(''),
 
   // Google
   GOOGLE_CLIENT_ID: z.string().optional(),
