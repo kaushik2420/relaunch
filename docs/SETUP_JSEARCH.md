@@ -17,20 +17,24 @@ This doc walks through enabling it. ~5 minutes.
 
 ## 2. Pick a plan
 
-Click the **Pricing** tab on the JSearch page.
+Click the **Pricing** tab on the JSearch page. RapidAPI restructures
+their tiers periodically, so prices below are a guide — check the live
+page for current numbers.
 
-| Plan | Cost | Requests/month | Good for |
-|---|---|---|---|
-| **Basic** | Free | 200 | Trying it out, not enough for daily cron |
-| **Pro** | $9.99/mo | 2,500 | **Recommended** — covers a daily cron for ~80 users with headroom |
-| **Ultra** | $24.99/mo | 10,000 | When you grow past ~300 users |
+| Plan        | Typical cost     | Requests/month | Good for                       |
+| ----------- | ---------------- | -------------- | ------------------------------ |
+| Free / Basic | $0              | ~200           | Trying it out, won't sustain a daily cron |
+| Lower paid  | ~$10/mo          | ~1–3 K         | Daily cron for ~50–80 active users |
+| Mid paid    | ~$25/mo          | ~10 K          | **Where Kaushik is today** — daily cron for ~300 users, lots of headroom |
+| Higher paid | $80+/mo          | 30 K+          | Scale past ~300 users          |
 
-For now, **subscribe to Pro**. The daily cron runs once per user; at
-5–10 active users you'll burn ~50 requests/day = ~1,500/month. Headroom
-matters because retries on flaky days can spike usage.
+The daily cron runs once per user; manual "Find matches now" clicks
+each add one more request. At 5–10 active users you'll burn
+~50 requests/day = ~1,500/month. The mid paid tier (~10 K/month) gives
+you a lot of room before scale becomes a problem.
 
-Click **Subscribe** under Pro. RapidAPI may ask for a credit card —
-the first $10 is the only commitment until you hit the limit.
+**Status on Relaunch's account: subscribed to the ~$25/mo (~10 K req)
+tier as of June 2026.**
 
 ## 3. Copy your API key
 

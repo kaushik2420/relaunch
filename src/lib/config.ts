@@ -36,7 +36,7 @@ const serverSchema = z.object({
   // Jobs
   JOB_PROVIDERS: z
     .string()
-    .default('adzuna,jooble,greenhouse,lever,workable,smartrecruiters,recruitee,themuse,remotive'),
+    .default('adzuna,jooble,greenhouse,lever,workable,smartrecruiters,recruitee,themuse,remotive,jsearch'),
   ADZUNA_APP_ID: z.string().optional(),
   ADZUNA_APP_KEY: z.string().optional(),
   JOOBLE_API_KEY: z.string().optional(),
