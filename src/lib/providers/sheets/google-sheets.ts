@@ -395,6 +395,48 @@ export class GoogleSheetsProvider implements SheetsProvider {
     });
     console.log(`[setReaction] ${matchedRows.length} row(s) ${matchedRows.join(',')} → "${value}" (${input.company} / ${input.role})`);
   }
+
+  // ----------------------------------------------------------------
+  async setApplied(input: {
+    spreadsheetId: string;
+    refreshToken: string;
+    company: string;
+    role: string;
+    applied: boolean;
+  }): Promise<void> {
+    // Same row-finding logic as setReaction (by company + role) — we
+    // write to column L (Applied?) instead of O (Reaction).
+    const sheets = this.sheetsClient(input.refreshToken);
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: input.spreadsheetId,
+      range: 'Daily Matches!B2:C',
+    });
+    const target = matchKey(input.company, input.role);
+    const matchedRows: number[] = [];
+    (res.data.values ?? []).forEach((row, i) => {
+      const [c, r] = row;
+      if (typeof c === 'string' && typeof r === 'string' && matchKey(c, r) === target) {
+        matchedRows.push(i + 2);
+      }
+    });
+    if (matchedRows.length === 0) {
+      console.warn(`[setApplied] no row matched company="${input.company}" role="${input.role}"`);
+      return;
+    }
+
+    const value = input.applied ? 'Yes' : '';
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: input.spreadsheetId,
+      requestBody: {
+        valueInputOption: 'RAW',
+        data: matchedRows.map((rowIdx) => ({
+          range: `Daily Matches!L${rowIdx}`,
+          values: [[value]],
+        })),
+      },
+    });
+    console.log(`[setApplied] ${matchedRows.length} row(s) → "${value}" (${input.company} / ${input.role})`);
+  }
 }
 
 // ---------------------------------------------------------------

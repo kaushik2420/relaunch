@@ -86,4 +86,17 @@ export interface SheetsProvider {
     role: string;
     reaction: '' | 'liked' | 'hidden';
   }): Promise<void>;
+
+  /**
+   * Mark a match as applied (or undo) in the Sheet — writes "Yes" or
+   * "" to column L (Applied?). Finds the row by (company, role) match.
+   * No-op if the row isn't found.
+   */
+  setApplied(input: {
+    spreadsheetId: string;
+    refreshToken: string;
+    company: string;
+    role: string;
+    applied: boolean;
+  }): Promise<void>;
 }

@@ -10,6 +10,7 @@ import { nextOnboardingStep } from '@/lib/services/onboarding-route';
 import { sheets } from '@/lib/providers/sheets';
 import { decrypt } from '@/lib/crypto';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { classifyAtsUrl } from '@/lib/ats-url';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 export const dynamic = 'force-dynamic'; // never cache — Sheet content changes every day
@@ -76,15 +77,23 @@ export default async function DashboardPage({
     (r.name as string).trim().toLowerCase(),
   );
 
-  // Sheet rows don't have IDs; key off (jobUrl) for applied + match by
-  // company-name ILIKE for watched. Tiny client-side join.
+  // Sheet rows don't have IDs; key off (jobUrl) for applied + match
+  // by company-name ILIKE for watched. The job_matches.apply_url is
+  // ALWAYS the canonical form (protocol+host+path, no query string)
+  // because that's what classifyAtsUrl produces. The sheet's jobUrl
+  // is the raw URL — we have to canonicalize it for the lookup or
+  // the Set.has() check silently fails. (This was the bug the user
+  // reported as 'Applied state not retained on reload'.)
   for (const m of matches) {
-    const canonical = m.jobUrl?.toLowerCase() ?? '';
-    if (appliedUrlSet.has(canonical) || appliedUrlSet.has(m.jobUrl ?? '')) {
-      m.applied = true;
+    if (m.jobUrl) {
+      const canonical = classifyAtsUrl(m.jobUrl).canonical;
+      if (appliedUrlSet.has(canonical)) {
+        m.applied = true;
+      }
     }
-    // Also annotate watched — we hang it on the row even though it's
-    // not in the canonical SheetMatchRow shape.
+    // Annotate watched — true if company name ILIKE-matches any
+    // watched name. Property not in the canonical SheetMatchRow
+    // shape (added optionally in sheets/types.ts).
     (m as SheetMatchRow & { watched?: boolean }).watched = watchedNamesLower.some(
       (n) => n && (m.company ?? '').toLowerCase().includes(n),
     );

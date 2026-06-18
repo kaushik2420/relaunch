@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { classifyAtsUrl } from "@/lib/ats-url";
+import { sheets as sheetsProvider } from "@/lib/providers/sheets";
+import { decrypt } from "@/lib/crypto";
 
 /**
  * Toggle a match's "applied" state. Defaults to marking-as-applied;
@@ -84,6 +86,31 @@ export async function markAppliedByUrlAction(
     console.error("[mark-applied-by-url] failed", error);
     throw new Error("Couldn't update — please try again.");
   }
+
+  // Best-effort: also update the Google Sheet's "Applied?" column (L)
+  // so users who track in the Sheet see the same state. Failure here
+  // is non-fatal — the DB write is the source of truth, the Sheet is
+  // a mirror.
+  try {
+    const { data: userRow } = await admin
+      .from("users")
+      .select("user_sheet_id, google_refresh_token_enc")
+      .eq("id", user.id)
+      .single();
+    if (userRow?.user_sheet_id && userRow.google_refresh_token_enc) {
+      const refreshToken = decrypt(userRow.google_refresh_token_enc);
+      await sheetsProvider().setApplied({
+        spreadsheetId: userRow.user_sheet_id,
+        refreshToken,
+        company,
+        role: title,
+        applied: !undo,
+      });
+    }
+  } catch (err) {
+    console.error("[mark-applied-by-url] sheet sync failed (non-fatal)", err);
+  }
+
   revalidatePath("/dashboard");
   revalidatePath("/all-matches");
 }
