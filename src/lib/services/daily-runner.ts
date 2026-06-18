@@ -115,13 +115,40 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // matches in the pool. The user sees them in the /all-matches view;
   // only the top 5 still get full tailoring in the email digest.
   const passed = verified.filter((r) => r.verifyScore >= 30);
-  const usable = passed.length ? passed : verified;
+
+  // Dedupe against anything we've already surfaced to this user in
+  // the past 7 days — same job shouldn't appear in the digest two
+  // days in a row. We compare on canonical apply_url so wrapper-vs-
+  // direct URL variants are treated as the same role.
+  const sevenDaysAgo = new Date(
+    Date.now() - 7 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const { data: recentRows } = await supabaseAdmin()
+    .from('job_matches')
+    .select('apply_url')
+    .eq('user_id', userRow.id)
+    .gte('created_at', sevenDaysAgo);
+  const recentUrls = new Set(
+    (recentRows ?? []).map((r) => r.apply_url as string),
+  );
+
+  const fresh = passed.filter((r) => {
+    const canonical = classifyAtsUrl(r.job.url).canonical;
+    return !recentUrls.has(canonical);
+  });
+  // If every match passed the 7-day dedupe, we have nothing fresh —
+  // fall back to the full passed set rather than emailing nothing.
+  const usable = fresh.length > 0 ? fresh : passed.length ? passed : verified;
   usable.sort(
     (a, b) =>
       (b.matchPercent + b.verifyScore) / 2 -
       (a.matchPercent + a.verifyScore) / 2,
   );
+  // Email digest grew from 5 → 10: top 5 fully tailored (sent below),
+  // bottom 5 surfaced as link-only previews so the user has more to
+  // scan without us doubling Claude spend.
   const top = usable.slice(0, 5);
+  const digestPreviews = usable.slice(5, 10);
   // Everything beyond the top 5 — persisted to job_matches as
   // summary-only rows (no tailored text). The dashboard surfaces them,
   // and the user can enrich any one via the extension or a dashboard
@@ -305,11 +332,23 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     console.error('[daily-runner] persistLongTail failed', err);
   }
 
-  // 5. Email digest
+  // 5. Email digest — top 5 fully tailored + 5 link-only previews
+  // for a total of up to 10 fresh roles per email.
+  const totalInDigest = matches.length + digestPreviews.length;
   await emailProvider().send({
     to: userRow.email,
-    subject: `${matches.length} fresh roles for you today 🌅`,
-    html: renderDigestHtml(userRow.first_name ?? 'friend', matches),
+    subject: `${totalInDigest} fresh roles for you today 🌅`,
+    html: renderDigestHtml(
+      userRow.first_name ?? 'friend',
+      matches,
+      digestPreviews.map((p) => ({
+        title: p.job.title,
+        company: p.job.company,
+        location: p.job.location,
+        url: p.job.url,
+        matchPercent: p.matchPercent,
+      })),
+    ),
   });
 
   return { matchesFound: ranked.length, emailed: matches.length, providers: lastFetchSummary() };
@@ -366,8 +405,21 @@ function parsePivotBrief(userRow: UserRow): PivotBrief | null {
   return null;
 }
 
-function renderDigestHtml(name: string, matches: TailoredJobMatch[]): string {
-  const items = matches
+interface DigestPreview {
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+  matchPercent: number;
+}
+
+function renderDigestHtml(
+  name: string,
+  matches: TailoredJobMatch[],
+  previews: DigestPreview[] = [],
+): string {
+  const total = matches.length + previews.length;
+  const tailoredItems = matches
     .map(
       (m) => `
         <tr><td style="padding:14px 0;border-top:1px solid #ECE7DD;">
@@ -375,17 +427,40 @@ function renderDigestHtml(name: string, matches: TailoredJobMatch[]): string {
           <div style="color:#5B6477;font-size:13px;">${escapeHtml(m.job.company)} · ${escapeHtml(m.job.location)}</div>
           <div style="margin-top:6px;font-size:13px;color:#0F172A;">${escapeHtml(m.tailored.summary)}</div>
           <a href="${escapeHtml(m.job.url)}" style="display:inline-block;margin-top:8px;color:#5B6CFF;font-weight:600;">View role →</a>
-        </td></tr>`
+        </td></tr>`,
     )
     .join('');
+
+  // Bottom-5 link-only previews — kept visually lighter so the eye
+  // doesn't read them as "another 5 tailored". Density over depth.
+  const previewItems = previews.length === 0 ? '' : `
+    <tr><td style="padding:18px 0 6px;border-top:2px solid #ECE7DD;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#3743C8;font-weight:600;">Also worth a look</div>
+      <div style="font-size:12px;color:#5B6477;margin-top:2px;">${previews.length} more roles you can tailor on demand via the extension or your dashboard.</div>
+    </td></tr>
+    ${previews
+      .map(
+        (p) => `
+        <tr><td style="padding:10px 0;border-top:1px solid #F4F1EB;">
+          <div style="font-size:14px;font-weight:600;">${escapeHtml(p.title)}</div>
+          <div style="color:#5B6477;font-size:12px;margin-top:1px;">
+            ${escapeHtml(p.company)} · ${escapeHtml(p.location)} ·
+            <span style="color:#3743C8;font-weight:600;">${p.matchPercent}% match</span>
+          </div>
+          <a href="${escapeHtml(p.url)}" style="display:inline-block;margin-top:4px;color:#5B6CFF;font-size:12px;">View role →</a>
+        </td></tr>`,
+      )
+      .join('')}
+  `;
+
   return `<!doctype html>
 <html><body style="font-family:-apple-system,Segoe UI,sans-serif;background:#FAF8F4;padding:24px;color:#1C2230;">
 <table style="max-width:560px;margin:0 auto;background:#fff;padding:24px;border-radius:14px;">
   <tr><td>
     <h1 style="margin:0 0 6px;font-size:22px;">Good morning, ${escapeHtml(name)} 🌅</h1>
-    <p style="margin:0 0 14px;color:#5B6477;font-size:14px;">${matches.length} roles picked for you today.</p>
-    <table style="width:100%;border-collapse:collapse;">${items}</table>
-    <p style="color:#8A93A6;font-size:12px;margin-top:18px;">All saved to your Google Sheet. Reply STOP to pause emails.</p>
+    <p style="margin:0 0 14px;color:#5B6477;font-size:14px;">${total} roles picked for you today — top ${matches.length} are fully tailored below.</p>
+    <table style="width:100%;border-collapse:collapse;">${tailoredItems}${previewItems}</table>
+    <p style="color:#8A93A6;font-size:12px;margin-top:18px;">All saved to your Google Sheet. <a href="https://www.get-relaunch.com/all-matches" style="color:#5B6CFF;">See all matches</a>. Reply STOP to pause emails.</p>
   </td></tr>
 </table></body></html>`;
 }

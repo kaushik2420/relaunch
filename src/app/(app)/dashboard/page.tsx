@@ -54,15 +54,16 @@ export default async function DashboardPage({
 
   const stats = computeStats(matches, row?.profile, !!row?.user_sheet_id);
 
-  // Total job_matches rows for this user — tells us how big the
-  // "see all" pool is (top 5 tailored + verified + discovered).
-  // Cheap COUNT query against the indexed (user_id) column.
+  // Total still-actionable job_matches in the last 24h — excludes
+  // anything the user already marked as applied. Cheap COUNT query
+  // against the partial index added in migration 0011.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { count: matchesLast24h } = await supabaseAdmin()
     .from('job_matches')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', user.id)
-    .gte('created_at', since);
+    .gte('created_at', since)
+    .is('applied_at', null);
   const totalPool = matchesLast24h ?? 0;
   // Greeting follows the user's preferred timezone so "Good morning" still
   // feels right when they open the app from anywhere.

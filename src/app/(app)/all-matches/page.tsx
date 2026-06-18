@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { MatchAppliedButton } from "./MatchAppliedButton";
 
 export const dynamic = "force-dynamic";
 
@@ -14,55 +15,89 @@ interface MatchRow {
   verify_score: number | null;
   tailored_resume_text: string | null;
   cover_letter_text: string | null;
+  applied_at: string | null;
   created_at: string;
 }
 
 /**
  * Full ranked list of every match Relaunch has saved for this user.
- * Today's top 5 are fully tailored (and arrived in the morning email);
- * the rest are summary-only and can be tailored on demand (via the
- * Chrome extension's "Generate tailored content" button or the
- * "Tailor this" action on a match here — TODO).
+ *
+ * Default view hides matches the user has marked as "applied" — toggle
+ * via the ?show=applied query param. Today's top 5 are fully tailored
+ * (and arrived in the morning email); the rest are summary-only.
  */
-export default async function AllMatchesPage() {
+export default async function AllMatchesPage({
+  searchParams,
+}: {
+  searchParams: { show?: string };
+}) {
   const sb = createSupabaseServer();
   const {
     data: { user },
   } = await sb.auth.getUser();
   if (!user) redirect("/login");
 
+  const showApplied = searchParams.show === "applied";
+
   const admin = supabaseAdmin();
-  const { data: rows } = await admin
+  const baseQuery = admin
     .from("job_matches")
     .select(
-      "id, apply_url, job_title, company, match_percent, verify_score, tailored_resume_text, cover_letter_text, created_at",
+      "id, apply_url, job_title, company, match_percent, verify_score, tailored_resume_text, cover_letter_text, applied_at, created_at",
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .order("match_percent", { ascending: false, nullsFirst: false })
     .limit(200);
 
+  const { data: rows } = showApplied
+    ? await baseQuery.not("applied_at", "is", null)
+    : await baseQuery.is("applied_at", null);
+
+  // Count the other bucket so we can label the toggle accurately.
+  const counterBase = admin
+    .from("job_matches")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+  const { count: otherCount } = showApplied
+    ? await counterBase.is("applied_at", null)
+    : await counterBase.not("applied_at", "is", null);
+
   const all = (rows ?? []) as MatchRow[];
-  // Group by day so users can scan "today" vs older quickly.
   const groups = groupByDay(all);
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-6">
-        <h1 className="text-3xl font-bold">All your matches</h1>
-        <p className="mt-1 text-sm text-ink-soft">
-          Every role Relaunch has surfaced for you, ranked by fit. The top 5
-          each day are fully tailored (and arrive in your morning email).
-          The rest are summary-only — open one to tailor it on demand.
-        </p>
+      <header className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">
+            {showApplied ? "Applied matches" : "All your matches"}
+          </h1>
+          <p className="mt-1 text-sm text-ink-soft">
+            {showApplied
+              ? "Roles you've marked as applied. Switch back below to see what's still open to apply to."
+              : "Every role Relaunch has surfaced for you, ranked by fit. The top 5 each day arrive fully tailored in your morning email. The rest are summary-only — open one to tailor it on demand."}
+          </p>
+        </div>
+        <Link
+          href={showApplied ? "/all-matches" : "/all-matches?show=applied"}
+          className="btn-soft text-xs whitespace-nowrap"
+        >
+          {showApplied
+            ? `Active matches (${otherCount ?? 0}) →`
+            : `Applied (${otherCount ?? 0}) →`}
+        </Link>
       </header>
 
       {all.length === 0 ? (
         <div className="card text-center">
-          <h2 className="text-xl font-semibold">No matches yet</h2>
+          <h2 className="text-xl font-semibold">
+            {showApplied ? "Nothing here yet" : "No matches yet"}
+          </h2>
           <p className="mt-2 text-sm text-ink-soft">
-            We&apos;ll pull fresh roles every morning. Run a search now from
-            the dashboard if you want to seed your first batch.
+            {showApplied
+              ? "When you mark a match as applied, it'll move here."
+              : "We'll pull fresh roles every morning. Run a search now from the dashboard if you want to seed your first batch."}
           </p>
           <Link href="/dashboard" className="btn-primary mt-4 inline-flex">
             Back to dashboard →
@@ -77,7 +112,7 @@ export default async function AllMatchesPage() {
               </h2>
               <div className="mt-3 space-y-2">
                 {items.map((m) => (
-                  <MatchRowCard key={m.id} match={m} />
+                  <MatchRowCard key={m.id} match={m} showApplied={showApplied} />
                 ))}
               </div>
             </section>
@@ -88,22 +123,28 @@ export default async function AllMatchesPage() {
   );
 }
 
-function MatchRowCard({ match }: { match: MatchRow }) {
+function MatchRowCard({
+  match,
+  showApplied,
+}: {
+  match: MatchRow;
+  showApplied: boolean;
+}) {
   const isTailored =
     !!match.tailored_resume_text || !!match.cover_letter_text;
   const pct = match.match_percent ?? 0;
   return (
-    <a
-      href={match.apply_url}
-      target="_blank"
-      rel="noreferrer"
-      className="block rounded-xl border border-line bg-surface p-4 shadow-card hover:shadow-lg transition-shadow"
-    >
+    <div className="rounded-xl border border-line bg-surface p-4 shadow-card transition-shadow hover:shadow-lg">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <a
+          href={match.apply_url}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 flex-1"
+        >
           <div className="font-bold text-ink truncate">{match.job_title}</div>
           <div className="text-sm text-ink-soft truncate">{match.company}</div>
-        </div>
+        </a>
         <div className="text-right shrink-0">
           <div className="text-lg font-bold text-brand-500">{pct}%</div>
           <div className="text-[10px] uppercase tracking-wider text-ink-mute">
@@ -125,9 +166,17 @@ function MatchRowCard({ match }: { match: MatchRow }) {
             Discovered — worth a look
           </span>
         )}
-        <span className="text-ink-mute ml-auto">View role →</span>
+        <MatchAppliedButton matchId={match.id} appliedAt={match.applied_at} />
+        <a
+          href={match.apply_url}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-auto text-ink-mute hover:text-ink"
+        >
+          View role →
+        </a>
       </div>
-    </a>
+    </div>
   );
 }
 
@@ -144,7 +193,11 @@ function groupByDay(rows: MatchRow[]): { label: string; items: MatchRow[] }[] {
     let label: string;
     if (d === today) label = "Today";
     else if (d === yesterday) label = "Yesterday";
-    else label = new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    else
+      label = new Date(d).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
     return { label, items };
   });
 }
