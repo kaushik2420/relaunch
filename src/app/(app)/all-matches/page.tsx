@@ -29,7 +29,7 @@ interface MatchRow {
 export default async function AllMatchesPage({
   searchParams,
 }: {
-  searchParams: { show?: string };
+  searchParams: { show?: string; from?: string };
 }) {
   const sb = createSupabaseServer();
   const {
@@ -38,9 +38,22 @@ export default async function AllMatchesPage({
   if (!user) redirect("/login");
 
   const showApplied = searchParams.show === "applied";
+  const watchlistOnly = searchParams.from === "watchlist";
 
   const admin = supabaseAdmin();
-  const baseQuery = admin
+
+  // Pull watched-company names so we can filter the matches list
+  // by ILIKE-OR if the watchlist filter is on. Always pulled (cheap)
+  // so we can also show 'No companies watched yet' empty state.
+  const { data: watchedRows } = await admin
+    .from("watched_companies")
+    .select("name")
+    .eq("user_id", user.id);
+  const watchedNames = (watchedRows ?? []).map(
+    (r) => (r.name as string).trim(),
+  );
+
+  let baseQuery = admin
     .from("job_matches")
     .select(
       "id, apply_url, job_title, company, match_percent, verify_score, tailored_resume_text, cover_letter_text, applied_at, created_at",
@@ -49,6 +62,16 @@ export default async function AllMatchesPage({
     .order("created_at", { ascending: false })
     .order("match_percent", { ascending: false, nullsFirst: false })
     .limit(200);
+
+  // OR together one ILIKE per watched company. PostgREST `.or()` takes
+  // a comma-separated list of conditions — escape commas in names just
+  // in case ("Procter, Gamble" etc).
+  if (watchlistOnly && watchedNames.length > 0) {
+    const orExpr = watchedNames
+      .map((n) => `company.ilike.%${n.replace(/,/g, "\\,").replace(/\(/g, "\\(").replace(/\)/g, "\\)")}%`)
+      .join(",");
+    baseQuery = baseQuery.or(orExpr);
+  }
 
   const { data: rows } = showApplied
     ? await baseQuery.not("applied_at", "is", null)
@@ -68,39 +91,97 @@ export default async function AllMatchesPage({
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">
-            {showApplied ? "Applied matches" : "All your matches"}
-          </h1>
-          <p className="mt-1 text-sm text-ink-soft">
+      <header className="mb-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">
+              {showApplied ? "Applied matches" : "All your matches"}
+            </h1>
+            <p className="mt-1 text-sm text-ink-soft">
+              {showApplied
+                ? "Roles you've marked as applied. Switch back below to see what's still open to apply to."
+                : "Every role Relaunch has surfaced for you, ranked by fit. The top 5 each day arrive fully tailored in your morning email."}
+            </p>
+          </div>
+          <Link
+            href={preserveOtherParams({ showApplied: !showApplied, watchlistOnly })}
+            className="btn-soft text-xs whitespace-nowrap"
+          >
             {showApplied
-              ? "Roles you've marked as applied. Switch back below to see what's still open to apply to."
-              : "Every role Relaunch has surfaced for you, ranked by fit. The top 5 each day arrive fully tailored in your morning email. The rest are summary-only — open one to tailor it on demand."}
-          </p>
+              ? `Active matches (${otherCount ?? 0}) →`
+              : `Applied (${otherCount ?? 0}) →`}
+          </Link>
         </div>
-        <Link
-          href={showApplied ? "/all-matches" : "/all-matches?show=applied"}
-          className="btn-soft text-xs whitespace-nowrap"
-        >
-          {showApplied
-            ? `Active matches (${otherCount ?? 0}) →`
-            : `Applied (${otherCount ?? 0}) →`}
-        </Link>
+
+        {/* Filter chips */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wider text-ink-mute">
+            Filter:
+          </span>
+          <Link
+            href={preserveOtherParams({ showApplied, watchlistOnly: false })}
+            className={
+              !watchlistOnly
+                ? "rounded-full bg-brand-500 px-3 py-1 text-xs font-semibold text-white"
+                : "rounded-full border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-soft hover:bg-cream-100"
+            }
+          >
+            All sources
+          </Link>
+          <Link
+            href={preserveOtherParams({ showApplied, watchlistOnly: true })}
+            className={
+              watchlistOnly
+                ? "rounded-full bg-brand-500 px-3 py-1 text-xs font-semibold text-white"
+                : "rounded-full border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-soft hover:bg-cream-100"
+            }
+          >
+            ⭐ Watchlist only ({watchedNames.length})
+          </Link>
+        </div>
       </header>
 
       {all.length === 0 ? (
         <div className="card text-center">
           <h2 className="text-xl font-semibold">
-            {showApplied ? "Nothing here yet" : "No matches yet"}
+            {watchlistOnly && watchedNames.length === 0
+              ? "No watchlist yet"
+              : watchlistOnly
+                ? "No matches from your watchlist yet"
+                : showApplied
+                  ? "Nothing here yet"
+                  : "No matches yet"}
           </h2>
           <p className="mt-2 text-sm text-ink-soft">
-            {showApplied
-              ? "When you mark a match as applied, it'll move here."
-              : "We'll pull fresh roles every morning. Run a search now from the dashboard if you want to seed your first batch."}
+            {watchlistOnly && watchedNames.length === 0 ? (
+              <>
+                Add companies you&apos;re actively interested in (Stripe,
+                Razorpay, Cred…) in Settings, and we&apos;ll pull from their
+                career pages in every daily run.
+              </>
+            ) : watchlistOnly ? (
+              <>
+                We haven&apos;t found matching roles at your watched
+                companies yet. They&apos;ll appear here as soon as the next
+                daily run picks them up.
+              </>
+            ) : showApplied ? (
+              "When you mark a match as applied, it'll move here."
+            ) : (
+              "We'll pull fresh roles every morning. Run a search now from the dashboard if you want to seed your first batch."
+            )}
           </p>
-          <Link href="/dashboard" className="btn-primary mt-4 inline-flex">
-            Back to dashboard →
+          <Link
+            href={
+              watchlistOnly && watchedNames.length === 0
+                ? "/settings"
+                : "/dashboard"
+            }
+            className="btn-primary mt-4 inline-flex"
+          >
+            {watchlistOnly && watchedNames.length === 0
+              ? "Manage watchlist →"
+              : "Back to dashboard →"}
           </Link>
         </div>
       ) : (
@@ -178,6 +259,23 @@ function MatchRowCard({
       </div>
     </div>
   );
+}
+
+/** Build a /all-matches URL with the given toggle state, preserving
+ *  the orthogonal toggle. Lets users flip one filter without losing
+ *  their other selection. */
+function preserveOtherParams({
+  showApplied,
+  watchlistOnly,
+}: {
+  showApplied: boolean;
+  watchlistOnly: boolean;
+}): string {
+  const params = new URLSearchParams();
+  if (showApplied) params.set("show", "applied");
+  if (watchlistOnly) params.set("from", "watchlist");
+  const qs = params.toString();
+  return qs ? `/all-matches?${qs}` : "/all-matches";
 }
 
 function groupByDay(rows: MatchRow[]): { label: string; items: MatchRow[] }[] {
