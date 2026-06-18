@@ -52,6 +52,44 @@ export default async function DashboardPage({
     }
   }
 
+  // Augment each sheet match with:
+  //   - applied: true if the Sheet's Applied? col is Yes, OR if the
+  //     job_matches.applied_at column is set for this URL
+  //   - watched: true if the company name matches any in the user's
+  //     watched_companies list (ILIKE)
+  // Both columns are used by MatchesView to drive the new filter chips.
+  const applyUrls = matches.map((m) => m.jobUrl).filter(Boolean);
+  let appliedUrlSet = new Set<string>();
+  if (applyUrls.length > 0) {
+    const { data: jm } = await supabaseAdmin()
+      .from('job_matches')
+      .select('apply_url')
+      .eq('user_id', user.id)
+      .not('applied_at', 'is', null);
+    appliedUrlSet = new Set((jm ?? []).map((r) => r.apply_url as string));
+  }
+  const { data: watchedRows } = await supabaseAdmin()
+    .from('watched_companies')
+    .select('name')
+    .eq('user_id', user.id);
+  const watchedNamesLower = (watchedRows ?? []).map((r) =>
+    (r.name as string).trim().toLowerCase(),
+  );
+
+  // Sheet rows don't have IDs; key off (jobUrl) for applied + match by
+  // company-name ILIKE for watched. Tiny client-side join.
+  for (const m of matches) {
+    const canonical = m.jobUrl?.toLowerCase() ?? '';
+    if (appliedUrlSet.has(canonical) || appliedUrlSet.has(m.jobUrl ?? '')) {
+      m.applied = true;
+    }
+    // Also annotate watched — we hang it on the row even though it's
+    // not in the canonical SheetMatchRow shape.
+    (m as SheetMatchRow & { watched?: boolean }).watched = watchedNamesLower.some(
+      (n) => n && (m.company ?? '').toLowerCase().includes(n),
+    );
+  }
+
   const stats = computeStats(matches, row?.profile, !!row?.user_sheet_id);
 
   // Total still-actionable job_matches in the last 24h — excludes

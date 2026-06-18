@@ -29,6 +29,10 @@ export interface SheetMatchRow {
   notes: string;
   /** User reaction stored in column O. Empty if no reaction. */
   reaction: '' | 'liked' | 'hidden';
+  /** Set server-side in dashboard/page.tsx — true if the company is
+   *  in the user's watched_companies list. Not present in the sheet
+   *  itself; populated by the join when the page loads. */
+  watched?: boolean;
 }
 
 export interface SheetsProvider {

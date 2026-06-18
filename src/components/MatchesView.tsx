@@ -31,6 +31,20 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
   const [sortBy, setSortBy] = useState<SortKey>('best');
   const [page, setPage] = useState(1);
+  // New filters: hide applied by default, and source = all|watchlist
+  const [hideApplied, setHideApplied] = useState(true);
+  const [source, setSource] = useState<'all' | 'watchlist'>('all');
+
+  // Watchlist-aware: does the data even contain any watched companies?
+  // If not, the source filter is meaningless — hide it.
+  const hasAnyWatched = useMemo(
+    () => matches.some((m) => m.watched === true),
+    [matches],
+  );
+  const appliedCount = useMemo(
+    () => matches.filter((m) => m.applied).length,
+    [matches],
+  );
 
   // Hydrate view preference from localStorage on first render.
   useEffect(() => {
@@ -48,7 +62,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   // Reset to page 1 whenever filters or sort change.
   useEffect(() => {
     setPage(1);
-  }, [modeFilter, locationFilter, matchFilter, sortBy]);
+  }, [modeFilter, locationFilter, matchFilter, sortBy, hideApplied, source]);
 
   // Unique locations present in the result set — derived from data so we
   // don't show options that filter to zero rows.
@@ -62,6 +76,10 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
 
   const filtered = useMemo(() => {
     return matches.filter((m) => {
+      // Hide applied (default ON — user can toggle off to see them)
+      if (hideApplied && m.applied) return false;
+      // Source filter — watchlist only?
+      if (source === 'watchlist' && !m.watched) return false;
       // Work mode
       if (modeFilter !== 'all') {
         const mode = (m.mode || '').toLowerCase();
@@ -78,7 +96,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
       }
       return true;
     });
-  }, [matches, modeFilter, locationFilter, matchFilter]);
+  }, [matches, modeFilter, locationFilter, matchFilter, hideApplied, source]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -106,6 +124,39 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
     <div>
       {/* Filter + view toggle bar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* Hide applied — default ON, only shown if there's anything
+            applied to hide. */}
+        {appliedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setHideApplied((v) => !v)}
+            className={`text-xs rounded-full border px-3 py-1 transition ${
+              hideApplied
+                ? 'border-brand-500 bg-brand-50 text-brand-700 font-semibold'
+                : 'border-line bg-surface text-ink-soft hover:border-brand-500/40'
+            }`}
+            aria-pressed={hideApplied}
+          >
+            {hideApplied
+              ? `🙈 Hiding ${appliedCount} applied`
+              : `👀 Showing applied (${appliedCount})`}
+          </button>
+        )}
+
+        {/* Source = all | watchlist — only if user has any watched
+            matches in the current list. */}
+        {hasAnyWatched && (
+          <FilterChips
+            label="Source"
+            value={source}
+            onChange={(v) => setSource(v as 'all' | 'watchlist')}
+            options={[
+              { v: 'all', label: 'All sources' },
+              { v: 'watchlist', label: '⭐ Watchlist only' },
+            ]}
+          />
+        )}
+
         <FilterChips
           label="Mode"
           value={modeFilter}
