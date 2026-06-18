@@ -12,6 +12,7 @@ interface WatchedRow {
   ats_slug: string | null;
   detection_status: "pending" | "detected" | "manual" | "not_found";
   careers_url: string | null;
+  last_checked_at: string | null;
   created_at: string;
 }
 
@@ -157,6 +158,9 @@ function StatusLine({ row }: { row: WatchedRow }) {
     );
   }
   if (row.detection_status === "manual") {
+    const checked = row.last_checked_at
+      ? formatRelative(new Date(row.last_checked_at))
+      : null;
     return (
       <div className="mt-0.5 text-xs">
         <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">
@@ -171,6 +175,9 @@ function StatusLine({ row }: { row: WatchedRow }) {
           >
             Visit careers page →
           </a>
+        )}
+        {checked && (
+          <span className="ml-2 text-ink-mute">· Last checked {checked}</span>
         )}
       </div>
     );
@@ -189,4 +196,18 @@ function StatusLine({ row }: { row: WatchedRow }) {
     );
   }
   return null;
+}
+
+/** Coarse "5 min ago" / "2 hours ago" / "yesterday" formatter. */
+function formatRelative(d: Date): string {
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 60_000) return "just now";
+  const m = Math.round(diffMs / 60_000);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const days = Math.round(h / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return d.toLocaleDateString();
 }

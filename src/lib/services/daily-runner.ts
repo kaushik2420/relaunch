@@ -14,6 +14,7 @@ import {
 } from '@/lib/role-families';
 import { classifyAtsUrl } from '@/lib/ats-url';
 import { fetchWatchedCompanyJobs } from './watched-fetch';
+import { monitorManualWatched } from './manual-careers-monitor';
 import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief, TailoredResume, CoverLetter, JobPosting } from '@/lib/types';
 
 /**
@@ -340,6 +341,22 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
     );
   } catch (err) {
     console.error('[daily-runner] persistLongTail failed', err);
+  }
+
+  // 4e. Manual watchlist monitoring — for companies where ATS auto-
+  // detect failed and the user pasted a careers URL, fetch the page,
+  // diff <a href> links against last_seen_urls, upsert anything new
+  // into job_matches. First-fetch is capped at 10 inserts to avoid
+  // flooding the dashboard on Day 1.
+  try {
+    const summary = await monitorManualWatched(userRow.id);
+    if (summary.newJobsFound > 0) {
+      console.log(
+        `[daily-runner] manual-monitor surfaced ${summary.newJobsFound} new postings across ${summary.companiesChecked} manual companies`,
+      );
+    }
+  } catch (err) {
+    console.error('[daily-runner] monitorManualWatched failed', err);
   }
 
   // 5. Email digest — top 5 fully tailored + 5 link-only previews

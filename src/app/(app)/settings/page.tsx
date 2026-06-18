@@ -100,7 +100,7 @@ export default async function SettingsPage({
 async function WatchedCompaniesCardServer({ userId }: { userId: string }) {
   const { data: rows } = await supabaseAdmin()
     .from('watched_companies')
-    .select('id, name, ats, ats_slug, detection_status, careers_url, created_at')
+    .select('id, name, ats, ats_slug, detection_status, careers_url, last_checked_at, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
   return <WatchedCompaniesCard rows={(rows ?? []) as Parameters<typeof WatchedCompaniesCard>[0]['rows']} />;
