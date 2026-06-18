@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import type { UserProfile } from '@/lib/types';
 import { ExtensionCard } from './ExtensionCard';
+import { WatchedCompaniesCard } from './WatchedCompaniesCard';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,6 +80,9 @@ export default async function SettingsPage({
 
       <ExtensionCard token={(row?.extension_token as string | null) ?? null} />
 
+      {/* Watched companies — feed into the daily run */}
+      <WatchedCompaniesCardServer userId={user.id} />
+
       <div className="card">
         <h2 className="text-xl font-bold">Privacy</h2>
         <p className="mt-1 text-sm text-ink-soft">
@@ -87,4 +92,16 @@ export default async function SettingsPage({
       </div>
     </div>
   );
+}
+
+/** Server component that fetches the user's watched companies and
+ *  passes them into the client-rendered card. Inlined here so we keep
+ *  the data-fetch local to the section that uses it. */
+async function WatchedCompaniesCardServer({ userId }: { userId: string }) {
+  const { data: rows } = await supabaseAdmin()
+    .from('watched_companies')
+    .select('id, name, ats, ats_slug, detection_status, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  return <WatchedCompaniesCard rows={(rows ?? []) as Parameters<typeof WatchedCompaniesCard>[0]['rows']} />;
 }

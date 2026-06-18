@@ -13,6 +13,7 @@ import {
   familyQuery,
 } from '@/lib/role-families';
 import { classifyAtsUrl } from '@/lib/ats-url';
+import { fetchWatchedCompanyJobs } from './watched-fetch';
 import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief, TailoredResume, CoverLetter, JobPosting } from '@/lib/types';
 
 /**
@@ -70,14 +71,23 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   const queryLocations = prefs.locations.length
     ? canonicalLocationLabels(prefs.locations)
     : ['India'];
-  const jobs = await fetchJobsFromAll({
-    query,
-    locations: queryLocations,
-    workMode: prefs.workModes[0] ?? 'any',
-    roleFamily: (userRow.role_family as 'engineering' | 'product' | 'design' | 'data' | 'marketing' | 'operations' | 'sales' | 'other' | null) ?? undefined,
-    limit: 60,
-    postedWithinDays: 7,
-  });
+  const [jobsFromProviders, jobsFromWatched] = await Promise.all([
+    fetchJobsFromAll({
+      query,
+      locations: queryLocations,
+      workMode: prefs.workModes[0] ?? 'any',
+      roleFamily: (userRow.role_family as 'engineering' | 'product' | 'design' | 'data' | 'marketing' | 'operations' | 'sales' | 'other' | null) ?? undefined,
+      limit: 60,
+      postedWithinDays: 7,
+    }),
+    // User-curated watchlist: pulls from every detected company's
+    // ATS board, all roles (no keyword filter — the ranker decides).
+    fetchWatchedCompanyJobs(userRow.id),
+  ]);
+  // Merge — let the embedding ranker decide which watched-company
+  // roles are actually a fit. Dedupe in fetchJobsFromAll is by
+  // (company, title); we rely on the rest of the pipeline for it.
+  const jobs = [...jobsFromProviders, ...jobsFromWatched];
 
   // 2. Rank + filter; take the top N (configurable)
   const ranked = await rankJobs(jobs, profile, prefs);
