@@ -2,6 +2,7 @@ import {
   addWatchedCompanyAction,
   removeWatchedCompanyAction,
   retryWatchedCompanyAction,
+  setManualCareersUrlAction,
 } from "./watched-companies-actions";
 
 interface WatchedRow {
@@ -10,6 +11,7 @@ interface WatchedRow {
   ats: string | null;
   ats_slug: string | null;
   detection_status: "pending" | "detected" | "manual" | "not_found";
+  careers_url: string | null;
   created_at: string;
 }
 
@@ -62,33 +64,7 @@ export function WatchedCompaniesCard({ rows }: { rows: WatchedRow[] }) {
       ) : (
         <ul className="mt-4 space-y-2">
           {rows.map((r) => (
-            <li
-              key={r.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-3 py-2"
-            >
-              <div className="min-w-0">
-                <div className="font-semibold text-ink truncate">{r.name}</div>
-                <StatusLine row={r} />
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {r.detection_status === "not_found" && (
-                  <form action={retryWatchedCompanyAction}>
-                    <input type="hidden" name="id" value={r.id} />
-                    <button className="btn-soft text-xs">Retry</button>
-                  </form>
-                )}
-                <form action={removeWatchedCompanyAction}>
-                  <input type="hidden" name="id" value={r.id} />
-                  <button
-                    className="btn-ghost text-xs text-rose-700 hover:bg-rose-50"
-                    type="submit"
-                    aria-label={`Remove ${r.name}`}
-                  >
-                    Remove
-                  </button>
-                </form>
-              </div>
-            </li>
+            <WatchedRowItem key={r.id} row={r} />
           ))}
         </ul>
       )}
@@ -111,6 +87,60 @@ export function WatchedCompaniesCard({ rows }: { rows: WatchedRow[] }) {
   );
 }
 
+/** One row in the watchlist — shows status, allows
+ *  retry/remove/url-fallback inline based on detection_status. */
+function WatchedRowItem({ row }: { row: WatchedRow }) {
+  return (
+    <li className="rounded-lg border border-line bg-white px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-semibold text-ink truncate">{row.name}</div>
+          <StatusLine row={row} />
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {row.detection_status === "not_found" && (
+            <form action={retryWatchedCompanyAction}>
+              <input type="hidden" name="id" value={row.id} />
+              <button className="btn-soft text-xs">Retry auto-detect</button>
+            </form>
+          )}
+          <form action={removeWatchedCompanyAction}>
+            <input type="hidden" name="id" value={row.id} />
+            <button
+              className="btn-ghost text-xs text-rose-700 hover:bg-rose-50"
+              type="submit"
+              aria-label={`Remove ${row.name}`}
+            >
+              Remove
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Inline fallback form for not_found — let the user paste a
+          careers page URL we'll track manually. */}
+      {row.detection_status === "not_found" && (
+        <form
+          action={setManualCareersUrlAction}
+          className="mt-2 flex flex-wrap gap-2 rounded-md bg-brand-50/60 p-2"
+        >
+          <input type="hidden" name="id" value={row.id} />
+          <input
+            type="url"
+            name="careersUrl"
+            placeholder={`https://${row.name.toLowerCase()}.com/careers`}
+            required
+            className="field flex-1 min-w-[160px] text-xs"
+          />
+          <button type="submit" className="btn-soft text-xs whitespace-nowrap">
+            Track via this URL →
+          </button>
+        </form>
+      )}
+    </li>
+  );
+}
+
 function StatusLine({ row }: { row: WatchedRow }) {
   if (row.detection_status === "detected") {
     return (
@@ -126,16 +156,35 @@ function StatusLine({ row }: { row: WatchedRow }) {
       <div className="mt-0.5 text-xs text-ink-mute">Auto-detecting ATS…</div>
     );
   }
+  if (row.detection_status === "manual") {
+    return (
+      <div className="mt-0.5 text-xs">
+        <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">
+          📌 Manual tracking
+        </span>
+        {row.careers_url && (
+          <a
+            href={row.careers_url}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-2 text-brand-700 hover:underline break-all"
+          >
+            Visit careers page →
+          </a>
+        )}
+      </div>
+    );
+  }
   if (row.detection_status === "not_found") {
     return (
       <div className="mt-0.5 text-xs">
         <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-800">
           Not found on supported ATSes
         </span>
-        <span className="ml-2 text-ink-mute">
-          They may use a custom careers page or a system we don&apos;t
-          track yet.
-        </span>
+        <p className="mt-1 text-ink-soft">
+          We couldn&apos;t auto-detect them. Paste their careers page URL
+          below to keep tracking them manually.
+        </p>
       </div>
     );
   }
