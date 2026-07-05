@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { serverConfig } from '@/lib/config';
+import { debugGetToken } from '@/lib/services/reddit-crawler';
 
 export const runtime = 'nodejs';
 
@@ -26,12 +27,54 @@ export async function GET() {
     return NextResponse.json({ error: 'Admin only.' }, { status: 403 });
   }
 
-  const url = 'https://www.reddit.com/r/layoffs/new.json?limit=3&raw_json=1';
+  const cfg = serverConfig();
+  const oauthConfigured = !!(
+    cfg.REDDIT_CLIENT_ID &&
+    cfg.REDDIT_CLIENT_SECRET &&
+    cfg.REDDIT_USERNAME &&
+    cfg.REDDIT_PASSWORD
+  );
+
+  if (!oauthConfigured) {
+    return NextResponse.json({
+      ok: false,
+      stage: 'oauth-not-configured',
+      hint:
+        'Reddit OAuth env vars are missing. Set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in Vercel → Settings → Environment Variables. See docs/REDDIT_OAUTH.md for the registration walkthrough.',
+      configured: {
+        REDDIT_CLIENT_ID: !!cfg.REDDIT_CLIENT_ID,
+        REDDIT_CLIENT_SECRET: !!cfg.REDDIT_CLIENT_SECRET,
+        REDDIT_USERNAME: !!cfg.REDDIT_USERNAME,
+        REDDIT_PASSWORD: !!cfg.REDDIT_PASSWORD,
+      },
+    });
+  }
+
+  // Step 1: token exchange
+  let tokenInfo: Awaited<ReturnType<typeof debugGetToken>>;
+  try {
+    tokenInfo = await debugGetToken();
+  } catch (err) {
+    return NextResponse.json({
+      ok: false,
+      stage: 'token-exchange',
+      error: (err as Error).message,
+      hint:
+        "Token exchange failed. Common causes: wrong client_id/secret, script app not owned by REDDIT_USERNAME, 2FA on the reddit account (unsupported by password grant), or the app was deleted. Double-check reddit.com/prefs/apps.",
+    });
+  }
+
+  // Step 2: hit a real subreddit with the token
+  const url = 'https://oauth.reddit.com/r/layoffs/new?limit=3&raw_json=1';
   let res: Response;
   const startedAt = Date.now();
   try {
     res = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      headers: {
+        Authorization: `Bearer ${tokenInfo.token}`,
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json',
+      },
       cache: 'no-store',
     });
   } catch (err) {
@@ -40,8 +83,7 @@ export async function GET() {
       stage: 'network',
       error: (err as Error).message,
       ms: Date.now() - startedAt,
-      hint:
-        "Vercel couldn't reach reddit.com at all. Rare — usually means an outage or a DNS-layer block.",
+      tokenPreview: tokenInfo.masked,
     });
   }
 
@@ -66,16 +108,20 @@ export async function GET() {
     statusText: res.statusText,
     ms,
     userAgent: USER_AGENT,
+    tokenPreview: tokenInfo.masked,
+    tokenCachedForMs: tokenInfo.cachedForMs,
     childrenCount,
     firstTitle: parsedFirstTitle,
     bodySnippet: bodyText.slice(0, 500).replace(/\s+/g, ' '),
     hint:
-      res.status === 403
-        ? "Reddit is blocking our anonymous request. Fix: switch to a script-app OAuth token (register at reddit.com/prefs/apps, then set REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET env vars)."
-        : res.status === 429
-          ? 'Rate limited. Wait a few minutes and retry, or switch to OAuth for the 600/10min rate limit.'
-          : res.status === 200
-            ? 'Reddit responded OK. If leads still show zero, the keyword pack isn\'t matching — check body of first post below.'
-            : null,
+      res.status === 401
+        ? 'Token was accepted at exchange but rejected at fetch. Reddit sometimes rate-limits new script apps for the first few hours — try again in ~30 min. If it persists, regenerate the app secret at reddit.com/prefs/apps.'
+        : res.status === 403
+          ? 'OAuth token exchanged but subreddit access denied. Rare — likely the subreddit is private or your account is banned there.'
+          : res.status === 429
+            ? 'Rate limited. Reddit gives OAuth apps 600 req/10min — wait a minute.'
+            : res.status === 200
+              ? 'Reddit responded OK. If leads still show zero, the keyword pack isn\'t matching — check firstTitle + bodySnippet.'
+              : null,
   });
 }

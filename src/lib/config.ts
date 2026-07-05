@@ -72,6 +72,14 @@ const serverSchema = z.object({
   SENTRY_DSN: z.string().optional(),
   CRON_SECRET: z.string().min(16),
 
+  // Reddit — distribution-lead crawler. Optional because the crawler
+  // still starts up without them; it just logs a helpful error and
+  // no-ops. See docs/REDDIT_OAUTH.md for how to register the script app.
+  REDDIT_CLIENT_ID: z.string().optional(),
+  REDDIT_CLIENT_SECRET: z.string().optional(),
+  REDDIT_USERNAME: z.string().optional(),
+  REDDIT_PASSWORD: z.string().optional(),
+
   // Admin — who can access /admin to review the waitlist + mint invites
   ADMIN_EMAIL: z.string().email().default('kaushikn2416@gmail.com'),
 });

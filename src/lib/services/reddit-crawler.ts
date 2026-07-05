@@ -13,15 +13,96 @@
  * Called from the /api/cron/reddit-leads endpoint daily.
  */
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { serverConfig } from '@/lib/config';
 
 /**
  * Reddit's docs require this exact User-Agent format:
  *   <platform>:<app_id>:<version> (by /u/<reddit_username>)
- * Deviating from it is one of the most common reasons Reddit
- * returns 403 to otherwise-legitimate crawlers.
- * See https://github.com/reddit-archive/reddit/wiki/API — 'API Rules'.
  */
 const USER_AGENT = 'web:relaunch-distribution:v1.0.0 (by /u/kaushikn2416)';
+
+/**
+ * Reddit OAuth (script app, password grant). See docs/REDDIT_OAUTH.md
+ * for how to register the app + set the env vars. As of 2023 Reddit
+ * has effectively killed anonymous .json access — every request now
+ * needs a bearer token.
+ *
+ * Tokens last ~24h. We cache in-memory per warm serverless instance;
+ * a cold start just fetches a fresh one, which costs one HTTP round-
+ * trip (~200ms).
+ */
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getRedditToken(): Promise<string> {
+  const now = Date.now();
+  if (cachedToken && cachedToken.expiresAt > now + 60_000) {
+    return cachedToken.token;
+  }
+
+  const cfg = serverConfig();
+  if (
+    !cfg.REDDIT_CLIENT_ID ||
+    !cfg.REDDIT_CLIENT_SECRET ||
+    !cfg.REDDIT_USERNAME ||
+    !cfg.REDDIT_PASSWORD
+  ) {
+    throw new Error(
+      'Reddit OAuth is not configured. Set REDDIT_CLIENT_ID / _SECRET / _USERNAME / _PASSWORD in Vercel env vars. See docs/REDDIT_OAUTH.md.',
+    );
+  }
+
+  const basic = Buffer.from(
+    `${cfg.REDDIT_CLIENT_ID}:${cfg.REDDIT_CLIENT_SECRET}`,
+  ).toString('base64');
+  const body = new URLSearchParams({
+    grant_type: 'password',
+    username: cfg.REDDIT_USERNAME,
+    password: cfg.REDDIT_PASSWORD,
+  });
+
+  const res = await fetch('https://www.reddit.com/api/v1/access_token', {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': USER_AGENT,
+    },
+    body: body.toString(),
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const snippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
+    throw new Error(`token exchange failed · HTTP ${res.status} · ${snippet}`);
+  }
+
+  const json = (await res.json()) as {
+    access_token?: string;
+    expires_in?: number;
+    error?: string;
+  };
+  if (!json.access_token) {
+    throw new Error(`token exchange gave no access_token · ${JSON.stringify(json)}`);
+  }
+  const expiresInMs = (json.expires_in ?? 3600) * 1000;
+  cachedToken = { token: json.access_token, expiresAt: now + expiresInMs };
+  return cachedToken.token;
+}
+
+/** Exposed for the diagnostic endpoint. Returns the raw token — the
+ *  caller is responsible for masking before echoing back to the UI. */
+export async function debugGetToken(): Promise<{
+  token: string;
+  masked: string;
+  cachedForMs: number;
+}> {
+  const token = await getRedditToken();
+  return {
+    token,
+    masked: token.slice(0, 6) + '…' + token.slice(-4),
+    cachedForMs: cachedToken ? cachedToken.expiresAt - Date.now() : 0,
+  };
+}
 
 /**
  * Subreddits we scan. Ordered by signal quality — r/layoffs is the
@@ -151,14 +232,17 @@ export async function crawlRedditLeads(): Promise<CrawlSummary> {
 }
 
 async function fetchNewPosts(subreddit: string, limit: number): Promise<RedditPost[]> {
-  // old.reddit.com serves the same JSON but with more lenient bot
-  // protection than www.reddit.com — worth trying if the primary
-  // host starts returning 403.
-  const url = `https://www.reddit.com/r/${subreddit}/new.json?limit=${limit}&raw_json=1`;
+  // OAuth base URL is oauth.reddit.com — same path shape but requires
+  // the Bearer token in Authorization. Path uses /new.json (not just
+  // /new) so we still get the JSON response envelope.
+  const token = await getRedditToken();
+  const url = `https://oauth.reddit.com/r/${subreddit}/new?limit=${limit}&raw_json=1`;
+
   let res: Response;
   try {
     res = await fetch(url, {
       headers: {
+        Authorization: `Bearer ${token}`,
         'User-Agent': USER_AGENT,
         Accept: 'application/json',
       },
@@ -168,10 +252,16 @@ async function fetchNewPosts(subreddit: string, limit: number): Promise<RedditPo
     throw new Error(`network error: ${(err as Error).message}`);
   }
 
+  if (res.status === 401) {
+    // Token got invalidated (rotated password, revoked app, etc.) —
+    // clear cache so the next call refetches. Bubble up so the summary
+    // banner shows a clear error.
+    cachedToken = null;
+    const snippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
+    throw new Error(`401 unauthorized · token rejected · ${snippet}`);
+  }
+
   if (!res.ok) {
-    // Grab a snippet of the response body so we can see what Reddit
-    // actually said — an HTML rate-limit page, a JSON error, or
-    // Cloudflare's blocked-request page all look different.
     let bodySnippet = '';
     try {
       bodySnippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
