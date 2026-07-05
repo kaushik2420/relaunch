@@ -5,6 +5,7 @@ import { Logo } from "@/components/Logo";
 import { NavTabs } from "@/components/NavTabs";
 import { evaluateTrial } from "@/lib/services/billing";
 import { PostHogIdentifier } from "@/components/PostHogIdentifier";
+import { SessionHeartbeat } from "@/components/SessionHeartbeat";
 
 /**
  * Authenticated app shell. Gates all (app)/* routes behind auth.
@@ -91,6 +92,7 @@ export default async function AppLayout({
         />
       </nav>
       <PostHogIdentifier userId={user.id} email={user.email!} />
+      <SessionHeartbeat />
       <main className="flex-1 bg-surface-page">{children}</main>
     </div>
   );

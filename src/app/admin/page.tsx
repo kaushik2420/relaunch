@@ -93,6 +93,56 @@ export default async function AdminPage({
   };
   const cost = estimateMonthlyCost(usage);
 
+  // ---- User activity: last login + total active time per user ----
+  // last_login_at is stamped on the first heartbeat of every new tab.
+  // Active time is the sum of (last_seen_at - started_at) across all
+  // sessions — computed here in JS after pulling the raw rows. Cheap
+  // for our current user count (<200); revisit as a materialised view
+  // when the table grows past ~10k sessions.
+  const { data: userData } = await supabaseAdmin()
+    .from("users")
+    .select("id, email, first_name, last_login_at, created_at, is_paying")
+    .order("last_login_at", { ascending: false, nullsFirst: false });
+  const userRows = (userData ?? []) as Array<{
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_login_at: string | null;
+    created_at: string;
+    is_paying: boolean | null;
+  }>;
+
+  const { data: sessionData } = await supabaseAdmin()
+    .from("user_sessions")
+    .select("user_id, started_at, last_seen_at");
+  const sessionRows = (sessionData ?? []) as Array<{
+    user_id: string;
+    started_at: string;
+    last_seen_at: string;
+  }>;
+
+  // Aggregate: total active seconds + session count per user.
+  const activityByUser = new Map<
+    string,
+    { seconds: number; sessions: number }
+  >();
+  for (const s of sessionRows) {
+    const start = new Date(s.started_at).getTime();
+    const end = new Date(s.last_seen_at).getTime();
+    // Ignore malformed rows and negative deltas defensively.
+    const seconds = Math.max(0, Math.round((end - start) / 1000));
+    const cur = activityByUser.get(s.user_id) ?? { seconds: 0, sessions: 0 };
+    cur.seconds += seconds;
+    cur.sessions += 1;
+    activityByUser.set(s.user_id, cur);
+  }
+
+  const activityRows = userRows.map((u) => ({
+    ...u,
+    activeSeconds: activityByUser.get(u.id)?.seconds ?? 0,
+    sessionCount: activityByUser.get(u.id)?.sessions ?? 0,
+  }));
+
   return (
     <main className="min-h-screen bg-surface-page">
       <nav className="flex items-center justify-between border-b border-line bg-surface px-6 py-3.5">
@@ -104,6 +154,77 @@ export default async function AdminPage({
         <h1 className="text-2xl font-bold">Relaunch admin</h1>
 
         <CostPanel cost={cost} usage={usage} />
+
+        {/* ---- Users & activity ---- */}
+        <div className="mt-12 flex items-baseline gap-3">
+          <h2 className="text-xl font-bold">Users &amp; activity</h2>
+          <span className="text-sm text-ink-soft">
+            {activityRows.length} total
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-ink-soft">
+          Last login and total active time (sum of session heartbeats,
+          idle time excluded). Newest logins first.
+        </p>
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-page text-left text-xs uppercase tracking-wide text-ink-soft">
+              <tr>
+                <th className="px-4 py-3 font-semibold">User</th>
+                <th className="px-4 py-3 font-semibold">Signed up</th>
+                <th className="px-4 py-3 font-semibold">Last login</th>
+                <th className="px-4 py-3 font-semibold">Active time</th>
+                <th className="px-4 py-3 text-right font-semibold">Sessions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activityRows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-ink-soft">
+                    No users yet.
+                  </td>
+                </tr>
+              )}
+              {activityRows.map((u) => (
+                <tr key={u.id} className="border-t border-line align-middle">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">
+                      {u.first_name || "—"}
+                      {u.is_paying && (
+                        <span className="ml-2 rounded-full bg-accent-500/30 px-2 py-0.5 text-[10px] font-semibold text-brand-700">
+                          Paying
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-ink-mute">{u.email}</div>
+                  </td>
+                  <td className="px-4 py-3 text-ink-mute">
+                    {fmtDate(u.created_at)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.last_login_at ? (
+                      <>
+                        <div>{fmtRelative(u.last_login_at)}</div>
+                        <div className="text-xs text-ink-mute">
+                          {fmtDateTime(u.last_login_at)}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-ink-mute">Never</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 font-medium">
+                    {fmtDuration(u.activeSeconds)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-ink-mute">
+                    {u.sessionCount}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <h2 className="mt-12 text-xl font-bold">Early-access waitlist</h2>
         <p className="mt-1 text-sm text-ink-soft">
@@ -414,4 +535,50 @@ function fmtDate(iso: string): string {
   return Number.isFinite(d.getTime())
     ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
     : iso;
+}
+
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function fmtRelative(iso: string): string {
+  const d = new Date(iso).getTime();
+  if (!Number.isFinite(d)) return iso;
+  const diff = Math.max(0, Date.now() - d);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+/**
+ * Human-friendly duration: shows two units at most.
+ *   45s  → "45s"
+ *   140s → "2m 20s"
+ *   3900 → "1h 5m"
+ *   90_000 → "25h"
+ *   360_000 → "4d 4h"
+ */
+function fmtDuration(seconds: number): string {
+  if (seconds <= 0) return "—";
+  const d = Math.floor(seconds / 86_400);
+  const h = Math.floor((seconds % 86_400) / 3_600);
+  const m = Math.floor((seconds % 3_600) / 60);
+  const s = seconds % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
