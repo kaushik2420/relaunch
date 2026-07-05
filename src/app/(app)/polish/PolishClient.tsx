@@ -180,6 +180,17 @@ export function PolishClient({
                   : `Accept all ${weakCount} rewrites`}
               </button>
             )}
+            <a
+              href="/api/polish/download"
+              className={
+                acceptedCount > 0
+                  ? "btn-primary text-xs"
+                  : "btn-soft text-xs"
+              }
+              title="Download your résumé as a PDF, including every rewrite you've accepted."
+            >
+              ⬇ Download résumé
+            </a>
             <button
               className="btn-soft text-xs"
               onClick={runAnalysis}
@@ -205,6 +216,31 @@ export function PolishClient({
         <p className="mb-4 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn">
           {errMsg}
         </p>
+      )}
+
+      {/* Celebration state — every weak bullet has been addressed.
+          Feels good, and points them straight at the download. */}
+      {weakCount === 0 && acceptedCount > 0 && (
+        <div className="mb-5 rounded-xl border border-success/30 bg-success-soft p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-success">
+                ✓ You&apos;re all polished — {acceptedCount}{" "}
+                {acceptedCount === 1 ? "bullet" : "bullets"} improved.
+              </p>
+              <p className="mt-0.5 text-xs text-ink-soft">
+                Grab your refreshed résumé as a PDF and start sending it out.
+              </p>
+            </div>
+            <a
+              href="/api/polish/download"
+              className="btn-primary text-sm"
+              title="Downloads a PDF with every accepted rewrite baked in."
+            >
+              ⬇ Download résumé PDF
+            </a>
+          </div>
+        </div>
       )}
 
       <div className="space-y-4">
