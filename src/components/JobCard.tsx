@@ -3,6 +3,7 @@ import { useState, useTransition } from 'react';
 import { ReactionButtons } from './ReactionButtons';
 import { MatchBar } from './MatchBar';
 import { markAppliedByUrlAction } from '@/app/(app)/all-matches/actions';
+import { SalaryCheck } from '@/app/(app)/all-matches/SalaryCheck';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 /**
@@ -117,6 +118,11 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
         >
           {applied ? '✓ Applied' : 'Mark as applied'}
         </button>
+        <SalaryCheck
+          jobTitle={m.role}
+          company={m.company}
+          location={m.location}
+        />
         {m.outcome && <span className="chip">{m.outcome}</span>}
         <div className="ml-auto">
           <ReactionButtons

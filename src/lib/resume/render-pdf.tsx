@@ -20,10 +20,10 @@ import type { UserProfile, TailoredResume, CoverLetter } from '@/lib/types';
  * (summary, experience).
  */
 
-const ACCENT = '#5B6CFF';
+const ACCENT = '#2C5239';
 const INK = '#1F2430';
-const MUTE = '#5B6477';
-const SIDEBAR_BG = '#EEF0FF';
+const MUTE = '#58665C';
+const SIDEBAR_BG = '#F4ECD8';
 
 const s = StyleSheet.create({
   // NOTE: we deliberately set NO lineHeight anywhere. react-pdf treats a

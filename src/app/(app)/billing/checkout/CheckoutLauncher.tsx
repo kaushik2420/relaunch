@@ -31,7 +31,7 @@ export function CheckoutLauncher({
         name: "Relaunch",
         description: "Monthly subscription",
         prefill: { email: userEmail, name: userName, contact: userPhone },
-        theme: { color: "#5B6CFF" },
+        theme: { color: "#2C5239" },
       });
       rzp.open();
     };
@@ -63,7 +63,7 @@ export function CheckoutLauncher({
               subscription_id: subscriptionId,
               name: "Relaunch",
               prefill: { email: userEmail, name: userName, contact: userPhone },
-              theme: { color: "#5B6CFF" },
+              theme: { color: "#2C5239" },
             });
             rzp.open();
           }

@@ -449,11 +449,11 @@ function renderDigestHtml(
   const tailoredItems = matches
     .map(
       (m) => `
-        <tr><td style="padding:14px 0;border-top:1px solid #ECE7DD;">
+        <tr><td style="padding:14px 0;border-top:1px solid #E8DFC7;">
           <div style="font-size:16px;font-weight:600;">${escapeHtml(m.job.title)}</div>
-          <div style="color:#5B6477;font-size:13px;">${escapeHtml(m.job.company)} · ${escapeHtml(m.job.location)}</div>
+          <div style="color:#58665C;font-size:13px;">${escapeHtml(m.job.company)} · ${escapeHtml(m.job.location)}</div>
           <div style="margin-top:6px;font-size:13px;color:#0F172A;">${escapeHtml(m.tailored.summary)}</div>
-          <a href="${escapeHtml(m.job.url)}" style="display:inline-block;margin-top:8px;color:#5B6CFF;font-weight:600;">View role →</a>
+          <a href="${escapeHtml(m.job.url)}" style="display:inline-block;margin-top:8px;color:#2C5239;font-weight:600;">View role →</a>
         </td></tr>`,
     )
     .join('');
@@ -461,33 +461,33 @@ function renderDigestHtml(
   // Bottom-5 link-only previews — kept visually lighter so the eye
   // doesn't read them as "another 5 tailored". Density over depth.
   const previewItems = previews.length === 0 ? '' : `
-    <tr><td style="padding:18px 0 6px;border-top:2px solid #ECE7DD;">
-      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#3743C8;font-weight:600;">Also worth a look</div>
-      <div style="font-size:12px;color:#5B6477;margin-top:2px;">${previews.length} more roles you can tailor on demand via the extension or your dashboard.</div>
+    <tr><td style="padding:18px 0 6px;border-top:2px solid #E8DFC7;">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#1A3826;font-weight:600;">Also worth a look</div>
+      <div style="font-size:12px;color:#58665C;margin-top:2px;">${previews.length} more roles you can tailor on demand via the extension or your dashboard.</div>
     </td></tr>
     ${previews
       .map(
         (p) => `
-        <tr><td style="padding:10px 0;border-top:1px solid #F4F1EB;">
+        <tr><td style="padding:10px 0;border-top:1px solid #F4ECD8;">
           <div style="font-size:14px;font-weight:600;">${escapeHtml(p.title)}</div>
-          <div style="color:#5B6477;font-size:12px;margin-top:1px;">
+          <div style="color:#58665C;font-size:12px;margin-top:1px;">
             ${escapeHtml(p.company)} · ${escapeHtml(p.location)} ·
-            <span style="color:#3743C8;font-weight:600;">${p.matchPercent}% match</span>
+            <span style="color:#1A3826;font-weight:600;">${p.matchPercent}% match</span>
           </div>
-          <a href="${escapeHtml(p.url)}" style="display:inline-block;margin-top:4px;color:#5B6CFF;font-size:12px;">View role →</a>
+          <a href="${escapeHtml(p.url)}" style="display:inline-block;margin-top:4px;color:#2C5239;font-size:12px;">View role →</a>
         </td></tr>`,
       )
       .join('')}
   `;
 
   return `<!doctype html>
-<html><body style="font-family:-apple-system,Segoe UI,sans-serif;background:#FAF8F4;padding:24px;color:#1C2230;">
+<html><body style="font-family:-apple-system,Segoe UI,sans-serif;background:#FAF5E9;padding:24px;color:#1C2220;">
 <table style="max-width:560px;margin:0 auto;background:#fff;padding:24px;border-radius:14px;">
   <tr><td>
     <h1 style="margin:0 0 6px;font-size:22px;">Good morning, ${escapeHtml(name)} 🌅</h1>
-    <p style="margin:0 0 14px;color:#5B6477;font-size:14px;">${total} roles picked for you today — top ${matches.length} are fully tailored below.</p>
+    <p style="margin:0 0 14px;color:#58665C;font-size:14px;">${total} roles picked for you today — top ${matches.length} are fully tailored below.</p>
     <table style="width:100%;border-collapse:collapse;">${tailoredItems}${previewItems}</table>
-    <p style="color:#8A93A6;font-size:12px;margin-top:18px;">All saved to your Google Sheet. <a href="https://www.get-relaunch.com/all-matches" style="color:#5B6CFF;">See all matches</a>. Reply STOP to pause emails.</p>
+    <p style="color:#8C998F;font-size:12px;margin-top:18px;">All saved to your Google Sheet. <a href="https://www.get-relaunch.com/all-matches" style="color:#2C5239;">See all matches</a>. Reply STOP to pause emails.</p>
   </td></tr>
 </table></body></html>`;
 }

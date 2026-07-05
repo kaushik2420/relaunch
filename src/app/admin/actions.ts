@@ -28,12 +28,12 @@ function inviteEmailHtml(firstName: string | null, link: string): string {
     <p>We reviewed your request for Relaunch — and we'd love to have you in this first small group.</p>
     <p>Here's your private invite link to set up your account. It works once, and it's just for you:</p>
     <p style="margin:26px 0">
-      <a href="${link}" style="background:#5b6cff;color:#ffffff;text-decoration:none;padding:13px 24px;border-radius:10px;font-weight:600;display:inline-block">
+      <a href="${link}" style="background:#2c5239;color:#ffffff;text-decoration:none;padding:13px 24px;border-radius:10px;font-weight:600;display:inline-block">
         Set up my account
       </a>
     </p>
     <p style="font-size:13px;color:#5b6477">Or paste this link into your browser:<br>
-      <a href="${link}" style="color:#5b6cff">${link}</a>
+      <a href="${link}" style="color:#2c5239">${link}</a>
     </p>
     <p style="font-size:13px;color:#5b6477;margin-top:24px">
       A tough chapter doesn't mean a tough story. We're glad you're here.<br>— The Relaunch team

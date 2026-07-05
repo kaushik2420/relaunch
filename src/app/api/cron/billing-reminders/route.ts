@@ -53,21 +53,21 @@ function bodyFor(name: string, days: number): string {
     days === 0 ? "Your trial ended — your Sheet stays in your Drive."
     : days === 1 ? `One more day, ${name}.`
     : `${days} days left, ${name}.`;
-  return `<!doctype html><html><body style="font-family:-apple-system,sans-serif;background:#FAF8F4;padding:24px;color:#1C2230;">
+  return `<!doctype html><html><body style="font-family:-apple-system,sans-serif;background:#FAF5E9;padding:24px;color:#1C2220;">
   <table style="max-width:520px;margin:0 auto;background:#fff;padding:24px;border-radius:14px;">
     <tr><td>
       <h1 style="margin:0 0 10px;font-size:22px;">${heading}</h1>
-      <p style="margin:0 0 14px;color:#5B6477;font-size:14px;">
+      <p style="margin:0 0 14px;color:#58665C;font-size:14px;">
         ${days === 0
           ? 'Your daily emails will pause until you re-subscribe. Your Google Sheet (and everything in it) stays right where it is — you own it.'
           : `Your free trial ends in ${days} day${days === 1 ? '' : 's'}. After that, Relaunch is ₹399/month — about twice our cost to run it for you.`}
       </p>
       <p style="margin:0 0 14px;font-size:14px;">
         If money is tight right now and you're still in the search,{' '}
-        reach out at <a href="mailto:hello@relaunch.app" style="color:#5B6CFF;">hello@relaunch.app</a>.
+        reach out at <a href="mailto:hello@relaunch.app" style="color:#2C5239;">hello@relaunch.app</a>.
         We have a hardship program. No questions asked.
       </p>
-      <a href="https://relaunch.app/billing" style="display:inline-block;background:#5B6CFF;color:white;padding:10px 16px;border-radius:8px;font-weight:600;text-decoration:none;">Continue on Relaunch Pro</a>
+      <a href="https://relaunch.app/billing" style="display:inline-block;background:#2C5239;color:white;padding:10px 16px;border-radius:8px;font-weight:600;text-decoration:none;">Continue on Relaunch Pro</a>
     </td></tr>
   </table></body></html>`;
 }
