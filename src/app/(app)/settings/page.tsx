@@ -80,8 +80,12 @@ export default async function SettingsPage({
 
       <ExtensionCard token={(row?.extension_token as string | null) ?? null} />
 
-      {/* Watched companies — feed into the daily run */}
-      <WatchedCompaniesCardServer userId={user.id} />
+      {/* Watched companies — feed into the daily run. The wrapping
+          div carries id="watched-companies" so the avatar-menu link
+          (/settings#watched-companies) can scroll straight to it. */}
+      <div id="watched-companies" className="scroll-mt-24">
+        <WatchedCompaniesCardServer userId={user.id} />
+      </div>
 
       <div className="card">
         <h2 className="text-xl font-bold">Privacy</h2>

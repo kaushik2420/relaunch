@@ -250,8 +250,8 @@ function UserMenu({
           </div>
           <div className="py-1">
             <MenuLink
-              href="/watched-companies"
-              active={pathname.startsWith('/watched-companies')}
+              href="/settings#watched-companies"
+              active={false /* section on the Settings page, not its own route */}
               onClick={() => setOpen(false)}
             >
               ⭐ Watched companies
