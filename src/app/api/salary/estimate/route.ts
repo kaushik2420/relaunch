@@ -58,17 +58,46 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Step 1: Adzuna histogram
+  // Step 1: Adzuna histogram. If the specific keyword returns nothing,
+  // retry with just the role family root (e.g. "Product Manager" from
+  // "Senior Product Manager, Growth") — otherwise low-signal queries
+  // fail immediately.
   let histogramResult;
   try {
     histogramResult = await fetchAdzunaHistogram({
       jobTitle,
       location: location || profile.location || 'India',
     });
+    if (histogramResult.totalVacancies === 0) {
+      // Try a broader keyword — drop leading modifiers.
+      const broader = jobTitle
+        .replace(/^(senior|sr\.?|jr\.?|junior|lead|staff|principal|head of|vp,?\s+)\s+/i, '')
+        .replace(/,\s*.+$/, '')
+        .trim();
+      if (broader && broader !== jobTitle) {
+        console.log(`[salary-estimate] retrying with broader query: "${broader}"`);
+        histogramResult = await fetchAdzunaHistogram({
+          jobTitle: broader,
+          location: location || profile.location || 'India',
+        });
+      }
+    }
   } catch (err) {
     return NextResponse.json(
       { error: (err as Error).message ?? 'Salary data source is temporarily unavailable.' },
       { status: 502 },
+    );
+  }
+
+  // If STILL zero postings after the broader retry, tell the user
+  // honestly rather than shipping a low-confidence hallucination.
+  if (histogramResult.totalVacancies === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "We couldn't find enough salary postings for this role in your region to build a reliable estimate. Try Levels.fyi or AmbitionBox for a manual look.",
+      },
+      { status: 404 },
     );
   }
 
