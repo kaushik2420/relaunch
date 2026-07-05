@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState, useTransition } from "react";
+import posthog from "posthog-js";
 import {
   analyseResumeAction,
   acceptRewriteAction,
@@ -74,6 +75,12 @@ export function PolishClient({
   async function runAnalysis() {
     setAnalysing(true);
     setErrMsg(null);
+    // Feature-adoption signal. Fires on both first analysis and every
+    // regenerate — the property distinguishes them.
+    posthog.capture("polish_analyse_started", {
+      is_regeneration: sessions.length > 0,
+      total_prior_sessions: sessions.length,
+    });
     try {
       const session = await analyseResumeAction();
       setActiveSession(session);

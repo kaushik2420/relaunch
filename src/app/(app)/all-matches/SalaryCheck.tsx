@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import posthog from "posthog-js";
 
 interface SalaryEstimate {
   rangeLow: number;
@@ -53,6 +54,14 @@ export function SalaryCheck({
       return;
     }
     setOpen(true);
+    // Feature-adoption signal for PostHog. Fires once per open event
+    // (not per fetch — a re-open of the already-loaded card doesn't
+    // burn tokens, but the intent to reference the range is real).
+    posthog.capture("salary_check_opened", {
+      role: jobTitle,
+      company,
+      location,
+    });
     if (data) return; // already fetched — just re-expand
     await fetchEstimate();
   }
