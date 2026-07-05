@@ -53,17 +53,19 @@ export function NavTabs({
         </Link>
       )}
 
-      <PrimaryTab href="/dashboard" pathname={pathname}>
-        Dashboard
-      </PrimaryTab>
-      <PrimaryTab href="/all-matches" pathname={pathname}>
-        Matches
-      </PrimaryTab>
-      <PrimaryTab href="/boost" pathname={pathname}>
-        Boost
-      </PrimaryTab>
-
-      <ToolsMenu pathname={pathname} />
+      {/* Primary tabs live inside a cream pill so they read as a group,
+          distinct from the trial chip on the left and the user menu on
+          the right. Dashboard, Matches, and Tools are the three every-
+          day tabs; Tools ▾ collapses Polish + Upskill + Boost. */}
+      <div className="flex items-center gap-1 rounded-full border border-line bg-cream-100 p-1">
+        <PrimaryTab href="/dashboard" pathname={pathname}>
+          Dashboard
+        </PrimaryTab>
+        <PrimaryTab href="/all-matches" pathname={pathname}>
+          Matches
+        </PrimaryTab>
+        <ToolsMenu pathname={pathname} />
+      </div>
 
       <UserMenu
         userInitial={userInitial}
@@ -89,8 +91,8 @@ function PrimaryTab({
       href={href}
       className={
         active
-          ? 'rounded-md px-2 py-1 font-semibold text-brand-700'
-          : 'rounded-md px-2 py-1 hover:text-ink'
+          ? 'rounded-full bg-white px-3 py-1 text-xs font-semibold text-brand-700 shadow-sm'
+          : 'rounded-full px-3 py-1 text-xs text-ink-soft hover:bg-white/60 hover:text-ink'
       }
     >
       {children}
@@ -106,7 +108,10 @@ function PrimaryTab({
 function ToolsMenu({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const active = pathname.startsWith('/polish') || pathname.startsWith('/upskill');
+  const active =
+    pathname.startsWith('/polish') ||
+    pathname.startsWith('/upskill') ||
+    pathname.startsWith('/boost');
 
   useEffect(() => {
     if (!open) return;
@@ -126,6 +131,11 @@ function ToolsMenu({ pathname }: { pathname: string }) {
     };
   }, [open]);
 
+  const triggerClass =
+    active || open
+      ? 'inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-brand-700 shadow-sm'
+      : 'inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs text-ink-soft hover:bg-white/60 hover:text-ink';
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -133,11 +143,7 @@ function ToolsMenu({ pathname }: { pathname: string }) {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={
-          active || open
-            ? 'inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-brand-700'
-            : 'inline-flex items-center gap-1 rounded-md px-2 py-1 hover:text-ink'
-        }
+        className={triggerClass}
       >
         Tools
         <svg
@@ -153,8 +159,15 @@ function ToolsMenu({ pathname }: { pathname: string }) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 min-w-[180px] rounded-lg border border-line bg-white py-1 shadow-lg"
+          className="absolute right-0 z-20 mt-1 min-w-[200px] rounded-lg border border-line bg-white py-1 shadow-lg"
         >
+          <MenuLink
+            href="/boost"
+            active={pathname.startsWith('/boost')}
+            onClick={() => setOpen(false)}
+          >
+            ⚡ Boost — LinkedIn presence
+          </MenuLink>
           <MenuLink
             href="/polish"
             active={pathname.startsWith('/polish')}

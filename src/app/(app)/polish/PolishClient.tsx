@@ -72,6 +72,54 @@ export function PolishClient({
     });
   }
 
+  // "Accept all" — batches the accept action across every weak,
+  // unaccepted bullet. We do them sequentially rather than
+  // Promise.all() because acceptRewriteAction writes to the same
+  // profile row for each call, and racing writes lose data.
+  const [batchAccepting, setBatchAccepting] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+  }>({ running: false, done: 0, total: 0 });
+
+  async function handleAcceptAll() {
+    const targets = feedback.filter((b) => b.isWeak && !b.accepted);
+    if (targets.length === 0) return;
+    // Guard rail — this is a bulk action, easy to trigger by accident.
+    if (
+      !window.confirm(
+        `Accept all ${targets.length} suggested rewrites? You can still edit each bullet in the résumé later.`,
+      )
+    ) {
+      return;
+    }
+    setBatchAccepting({ running: true, done: 0, total: targets.length });
+    setErrMsg(null);
+    let done = 0;
+    for (const b of targets) {
+      const k = keyOf(b);
+      const text = editedText[k]?.trim() || b.suggested;
+      try {
+        await acceptRewriteAction(b.experienceIndex, b.bulletIndex, text);
+        setFeedback((prev) =>
+          prev.map((f) =>
+            keyOf(f) === k ? { ...f, accepted: true, original: text } : f,
+          ),
+        );
+        done += 1;
+        setBatchAccepting({ running: true, done, total: targets.length });
+      } catch (err) {
+        setErrMsg(
+          `Accepted ${done} of ${targets.length} before hitting an error: ${
+            (err as Error).message
+          }`,
+        );
+        break;
+      }
+    }
+    setBatchAccepting({ running: false, done: 0, total: 0 });
+  }
+
   if (!analysed) {
     return (
       <div className="card">
@@ -107,24 +155,50 @@ export function PolishClient({
 
   return (
     <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-brand-50 px-4 py-3">
-        <div className="text-sm">
-          <strong>{weakCount}</strong>{" "}
-          {weakCount === 1 ? "bullet" : "bullets"} could be stronger
-          {acceptedCount > 0 && (
-            <span className="text-ink-soft">
-              {" · "}
-              <strong>{acceptedCount}</strong> already improved
-            </span>
-          )}
+      <div className="mb-5 rounded-xl bg-brand-50 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm">
+            <strong>{weakCount}</strong>{" "}
+            {weakCount === 1 ? "bullet" : "bullets"} could be stronger
+            {acceptedCount > 0 && (
+              <span className="text-ink-soft">
+                {" · "}
+                <strong>{acceptedCount}</strong> already improved
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {weakCount > 0 && (
+              <button
+                className="btn-primary text-xs"
+                onClick={handleAcceptAll}
+                disabled={batchAccepting.running || analysing || pending}
+                title="Accept every suggested rewrite in one click. You can still edit later."
+              >
+                {batchAccepting.running
+                  ? `Accepting ${batchAccepting.done + 1} of ${batchAccepting.total}…`
+                  : `Accept all ${weakCount} rewrites`}
+              </button>
+            )}
+            <button
+              className="btn-soft text-xs"
+              onClick={runAnalysis}
+              disabled={analysing || batchAccepting.running}
+            >
+              Re-analyse
+            </button>
+          </div>
         </div>
-        <button
-          className="btn-soft text-xs"
-          onClick={runAnalysis}
-          disabled={analysing}
-        >
-          Re-analyse
-        </button>
+        {batchAccepting.running && (
+          <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white">
+            <div
+              className="h-full bg-brand-500 transition-all"
+              style={{
+                width: `${Math.round((batchAccepting.done / batchAccepting.total) * 100)}%`,
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {errMsg && (
@@ -182,7 +256,7 @@ export function PolishClient({
                   Suggested rewrite
                 </div>
                 <textarea
-                  className="field mt-1 text-sm"
+                  className="input mt-1 block w-full text-sm leading-relaxed"
                   rows={3}
                   value={editedText[k] ?? ""}
                   onChange={(e) =>
