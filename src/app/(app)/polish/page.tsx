@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PolishClient } from "./PolishClient";
+import type { PolishSession, PolishSessionSummary, PolishFeedback } from "./actions";
 import type { UserProfile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +67,44 @@ export default async function PolishPage() {
 
   const totalBullets = bullets.length;
 
+  // Pull the last 5 polish sessions + the most recent one's feedback
+  // so the client can hydrate without re-running Claude. If the table
+  // is empty (user has never analysed before), both are null.
+  const admin = supabaseAdmin();
+  const { data: sessionRows } = await admin
+    .from("polish_sessions")
+    .select("id, created_at, total_bullets, weak_bullets, accepted_count, feedback")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(5);
+  const rows = (sessionRows ?? []) as Array<{
+    id: string;
+    created_at: string;
+    total_bullets: number;
+    weak_bullets: number;
+    accepted_count: number;
+    feedback: PolishFeedback[];
+  }>;
+
+  const sessions: PolishSessionSummary[] = rows.map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    totalBullets: r.total_bullets,
+    weakBullets: r.weak_bullets,
+    acceptedCount: r.accepted_count,
+  }));
+
+  const latestSession: PolishSession | null = rows[0]
+    ? {
+        id: rows[0].id,
+        createdAt: rows[0].created_at,
+        totalBullets: rows[0].total_bullets,
+        weakBullets: rows[0].weak_bullets,
+        acceptedCount: rows[0].accepted_count,
+        feedback: rows[0].feedback ?? [],
+      }
+    : null;
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
       <header className="mb-6">
@@ -91,7 +131,11 @@ export default async function PolishPage() {
           </p>
         </div>
       ) : (
-        <PolishClient initialBullets={bullets} />
+        <PolishClient
+          initialBullets={bullets}
+          initialSessions={sessions}
+          initialSession={latestSession}
+        />
       )}
     </div>
   );
