@@ -1,21 +1,42 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { ReactionButtons } from './ReactionButtons';
+import { useRouter } from 'next/navigation';
 import { MatchBar } from './MatchBar';
+import { OverflowMenu, OverflowMenuLink, OverflowMenuButton } from './OverflowMenu';
 import { markAppliedByUrlAction } from '@/app/(app)/all-matches/actions';
 import { SalaryCheck } from '@/app/(app)/all-matches/SalaryCheck';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 /**
  * Client component because it owns its own "hidden" state — when the
- * user clicks 👎 we want the card to disappear instantly, well before
- * the server re-renders the dashboard. The reactionButtons API call
- * still happens in the background to persist 'hidden' to the Sheet.
+ * user picks "Hide" from the overflow menu we want the card to
+ * disappear instantly, well before the server re-renders the
+ * dashboard. The reaction API call still happens in the background.
+ *
+ * Layout (redesigned to reduce clutter):
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │  Role  ★ Watched         89% match                   │
+ *   │  Company · Location · Mode                           │
+ *   │  💰 Expected CTC                                     │
+ *   │  👋 Referrers                                        │
+ *   │                                                      │
+ *   │  [View role ↗] [Mark applied] [Salary check]    ⋯    │
+ *   │                                                      │
+ *   │  (Salary check card expands here when opened)        │
+ *   └──────────────────────────────────────────────────────┘
+ *
+ * Overflow menu ⋯ contains:
+ *   • Résumé PDF        (download link, if generated)
+ *   • Cover letter PDF  (download link, if generated)
+ *   • Editable copies   (Google Docs, if generated)
+ *   • 👍 Like  /  👎 Hide
  */
 export function JobCard({ m }: { m: SheetMatchRow }) {
+  const router = useRouter();
   const [hidden, setHidden] = useState(false);
   // Optimistic applied state — flip immediately, then server reconciles.
   const [applied, setApplied] = useState(!!m.applied);
+  const [reaction, setReaction] = useState<'' | 'liked' | 'hidden'>(m.reaction);
   const [, startTransition] = useTransition();
 
   function handleMarkApplied() {
@@ -25,18 +46,43 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
       try {
         await markAppliedByUrlAction(m.jobUrl, m.role, m.company, !next);
       } catch {
-        // Revert on error.
         setApplied(!next);
       }
     });
   }
 
+  async function handleReact(next: '' | 'liked' | 'hidden') {
+    const previous = reaction;
+    setReaction(next);
+    if (next === 'hidden') setHidden(true); // instant hide, before API
+    try {
+      const res = await fetch('/api/matches/react', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company: m.company, role: m.role, reaction: next }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      startTransition(() => router.refresh());
+    } catch {
+      setReaction(previous);
+      if (next === 'hidden') setHidden(false);
+    }
+  }
+
   if (hidden) return null;
+
+  const hasDownloads = !!(
+    m.tailoredResumeUrl ||
+    m.coverLetterUrl ||
+    m.tailoredResumeDocUrl ||
+    m.coverLetterDocUrl
+  );
 
   return (
     <div className="card">
+      {/* Header row: title + match% */}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <h3 className="text-base font-semibold">{m.role}</h3>
             {m.watched && (
@@ -45,6 +91,16 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
                 title="Company on your watchlist"
               >
                 ⭐ Watched
+              </span>
+            )}
+            {reaction === 'liked' && (
+              <span className="chip text-[10px] bg-success-soft text-success" title="You liked this">
+                👍 Liked
+              </span>
+            )}
+            {applied && (
+              <span className="chip text-[10px] bg-success-soft text-success">
+                ✓ Applied
               </span>
             )}
           </div>
@@ -56,6 +112,7 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
         {m.matchPercent > 0 && <MatchBar percent={m.matchPercent} />}
       </div>
 
+      {/* Meta lines — CTC, referrers, outcome. */}
       {m.expectedCtc && (
         <p className="mt-2 text-xs text-ink-soft">💰 {m.expectedCtc}</p>
       )}
@@ -76,6 +133,13 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
         </p>
       ) : null}
 
+      {m.outcome && (
+        <p className="mt-2">
+          <span className="chip text-[10px]">{m.outcome}</span>
+        </p>
+      )}
+
+      {/* Action row — 3 primary buttons, then ⋯ overflow on the right. */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {m.jobUrl && (
           <a
@@ -85,26 +149,6 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
             className="btn-primary text-xs px-3 py-1.5"
           >
             View role ↗
-          </a>
-        )}
-        {m.tailoredResumeUrl && (
-          <a
-            href={m.tailoredResumeUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="btn-soft text-xs px-3 py-1.5"
-          >
-            📄 Résumé
-          </a>
-        )}
-        {m.coverLetterUrl && (
-          <a
-            href={m.coverLetterUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="btn-soft text-xs px-3 py-1.5"
-          >
-            ✉️ Cover letter
           </a>
         )}
         <button
@@ -123,43 +167,62 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
           company={m.company}
           location={m.location}
         />
-        {m.outcome && <span className="chip">{m.outcome}</span>}
         <div className="ml-auto">
-          <ReactionButtons
-            company={m.company}
-            role={m.role}
-            initial={m.reaction}
-            onHide={() => setHidden(true)}
-          />
+          <OverflowMenu label="More actions for this role">
+            {(close) => (
+              <>
+                {hasDownloads && (
+                  <div className="border-b border-line pb-1 mb-1">
+                    <p className="px-3 pt-1.5 text-[10px] uppercase tracking-wide text-ink-mute">
+                      Documents
+                    </p>
+                    {m.tailoredResumeUrl && (
+                      <OverflowMenuLink href={m.tailoredResumeUrl}>
+                        📄 Tailored résumé (PDF)
+                      </OverflowMenuLink>
+                    )}
+                    {m.coverLetterUrl && (
+                      <OverflowMenuLink href={m.coverLetterUrl}>
+                        ✉️ Cover letter (PDF)
+                      </OverflowMenuLink>
+                    )}
+                    {m.tailoredResumeDocUrl && (
+                      <OverflowMenuLink href={m.tailoredResumeDocUrl}>
+                        ✏️ Edit résumé (Google Docs)
+                      </OverflowMenuLink>
+                    )}
+                    {m.coverLetterDocUrl && (
+                      <OverflowMenuLink href={m.coverLetterDocUrl}>
+                        ✏️ Edit cover letter (Google Docs)
+                      </OverflowMenuLink>
+                    )}
+                  </div>
+                )}
+                <p className="px-3 pt-1.5 text-[10px] uppercase tracking-wide text-ink-mute">
+                  Feedback
+                </p>
+                <OverflowMenuButton
+                  onClick={() => {
+                    handleReact(reaction === 'liked' ? '' : 'liked');
+                    close();
+                  }}
+                >
+                  {reaction === 'liked' ? '↺ Unlike' : '👍 Like — keeps in your feed'}
+                </OverflowMenuButton>
+                <OverflowMenuButton
+                  variant="danger"
+                  onClick={() => {
+                    handleReact('hidden');
+                    close();
+                  }}
+                >
+                  👎 Not a fit — hide this
+                </OverflowMenuButton>
+              </>
+            )}
+          </OverflowMenu>
         </div>
       </div>
-
-      {(m.tailoredResumeDocUrl || m.coverLetterDocUrl) && (
-        <p className="mt-2 text-xs text-ink-soft">
-          Editable copies:{' '}
-          {m.tailoredResumeDocUrl && (
-            <a
-              href={m.tailoredResumeDocUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-brand-700 hover:underline"
-            >
-              résumé
-            </a>
-          )}
-          {m.tailoredResumeDocUrl && m.coverLetterDocUrl && ' · '}
-          {m.coverLetterDocUrl && (
-            <a
-              href={m.coverLetterDocUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-brand-700 hover:underline"
-            >
-              cover letter
-            </a>
-          )}
-        </p>
-      )}
     </div>
   );
 }

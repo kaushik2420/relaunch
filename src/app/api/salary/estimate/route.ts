@@ -3,6 +3,7 @@ import { createSupabaseServer } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { llm } from '@/lib/providers/llm';
 import { fetchAdzunaHistogram } from '@/lib/services/adzuna-salary';
+import { parseCtcToNumber, hikePercent, formatCtc } from '@/lib/utils/parse-ctc';
 import type { UserProfile } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -43,14 +44,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'jobTitle required.' }, { status: 400 });
   }
 
-  // Fetch profile — the personalisation is only meaningful if we know
-  // the user's seniority + years.
+  // Fetch profile + current CTC. Profile is required (we personalise
+  // by seniority + years). Current CTC is optional — if set, we return
+  // a hike% alongside the range.
   const { data: row } = await supabaseAdmin()
     .from('users')
-    .select('profile')
+    .select('profile, current_ctc')
     .eq('id', user.id)
     .single();
   const profile = (row?.profile ?? null) as UserProfile | null;
+  const currentCtcRaw = (row?.current_ctc ?? null) as string | null;
   if (!profile || !profile.fullName) {
     return NextResponse.json(
       { error: 'Upload your résumé in Relaunch first — we need it to personalise the estimate.' },
@@ -143,9 +146,38 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Salary-hike calc. Only meaningful when the user has recorded a
+  // current CTC and the currencies match (comparing INR-in-hand to a
+  // USD posting is not a hike — it's a cost-of-living swap). When
+  // currencies differ we still return the range but skip the hike %.
+  const currentParsed = parseCtcToNumber(currentCtcRaw);
+  let hike: {
+    currentCtc: string;
+    currentAmount: number;
+    currency: string;
+    lowPct: number | null;
+    midPct: number | null;
+    highPct: number | null;
+  } | null = null;
+  if (currentParsed && currentParsed.currency === estimate.currency) {
+    hike = {
+      currentCtc: formatCtc(currentParsed.amount, currentParsed.currency),
+      currentAmount: currentParsed.amount,
+      currency: currentParsed.currency,
+      lowPct: hikePercent(currentParsed.amount, estimate.rangeLow),
+      midPct: hikePercent(currentParsed.amount, estimate.rangeMid),
+      highPct: hikePercent(currentParsed.amount, estimate.rangeHigh),
+    };
+  }
+
   return NextResponse.json({
     ...estimate,
     verifyLinks,
+    // hike is null when currentCtc hasn't been set OR currencies don't
+    // match — the client shows a "Add your current CTC" prompt in that
+    // case so the user can unlock the hike display.
+    hike,
+    hasCurrentCtc: !!currentParsed,
     poweredBy: 'Adzuna market data + Relaunch',
     disclaimer:
       "This is a directional estimate based on posted salaries + your profile — not an offer. Always verify on the sources linked below before you accept.",

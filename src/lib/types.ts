@@ -35,6 +35,13 @@ export interface UserPreferences {
   locations: string[];
   workModes: ('remote' | 'hybrid' | 'onsite' | 'any')[];
   targetCtc?: string;
+  /**
+   * User's *current* annual compensation — baseline for the salary-hike
+   * calculation shown on each match card. Free-form text ("18L", "22
+   * LPA", "$140k"); parsed by parseCtcToNumber() when we need the
+   * numeric value.
+   */
+  currentCtc?: string;
   phone?: string;
   noticePeriod?: string;
   notes?: string;

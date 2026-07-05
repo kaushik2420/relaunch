@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
-import { signOutAction } from "../(auth)/actions";
 import { Logo } from "@/components/Logo";
+import { NavTabs } from "@/components/NavTabs";
 import { evaluateTrial } from "@/lib/services/billing";
 import { PostHogIdentifier } from "@/components/PostHogIdentifier";
 
@@ -46,6 +46,13 @@ export default async function AppLayout({
     free_until: row.free_until as string,
   });
 
+  // Initial for the avatar chip. Prefer the first letter of first_name
+  // when available (feels more personal); fall back to the email.
+  const initial =
+    (row.first_name && row.first_name.trim()[0]) ||
+    (user.email && user.email.trim()[0]) ||
+    "R";
+
   return (
     <div className="min-h-screen flex flex-col">
       <nav className="flex items-center justify-between border-b border-line bg-surface px-7 py-3.5">
@@ -76,48 +83,12 @@ export default async function AppLayout({
             Comeback Circle
           </a>
         </div>
-        <div className="flex items-center gap-3 text-sm text-ink-soft">
-          {trial.status === "trial-active" && (
-            <span className="hidden md:inline">
-              Free for {trial.daysLeft} more{" "}
-              {trial.daysLeft === 1 ? "day" : "days"}
-            </span>
-          )}
-          {trial.status === "trial-expiring" && (
-            <Link href="/billing" className="chip-accent">
-              Trial ends in {trial.daysLeft} d → upgrade
-            </Link>
-          )}
-          {trial.status === "trial-expired" && (
-            <Link href="/billing" className="chip-accent">
-              Upgrade to continue
-            </Link>
-          )}
-          <Link href="/dashboard" className="hover:text-ink">
-            Dashboard
-          </Link>
-          <Link href="/all-matches" className="hover:text-ink">
-            All matches
-          </Link>
-          <Link href="/polish" className="hover:text-ink">
-            Polish résumé
-          </Link>
-          <Link href="/upskill" className="hover:text-ink">
-            Upskill
-          </Link>
-          <Link href="/boost" className="hover:text-ink">
-            Boost
-          </Link>
-          <Link href="/feedback" className="hover:text-ink">
-            Feedback
-          </Link>
-          <Link href="/settings" className="hover:text-ink">
-            Settings
-          </Link>
-          <form action={signOutAction}>
-            <button className="btn-ghost text-xs">Sign out</button>
-          </form>
-        </div>
+        <NavTabs
+          trialStatus={trial.status}
+          daysLeft={trial.daysLeft}
+          userInitial={initial}
+          userEmail={user.email!}
+        />
       </nav>
       <PostHogIdentifier userId={user.id} email={user.email!} />
       <main className="flex-1 bg-surface-page">{children}</main>
