@@ -705,6 +705,218 @@ Rules:
 
     return extractJSON<{ summary: string; whyThisRole: string; coverLetterText: string }>(message);
   }
+
+  // ----------------------------------------------------------------
+  // polishResume — bullet-by-bullet feedback + rewrite suggestions
+  // ----------------------------------------------------------------
+  async polishResume({
+    profile,
+  }: {
+    profile: UserProfile;
+  }): Promise<{
+    bullets: {
+      experienceIndex: number;
+      bulletIndex: number;
+      original: string;
+      feedback: string;
+      suggested: string;
+      isWeak: boolean;
+    }[];
+  }> {
+    // Build the full bullet inventory with numeric IDs the LLM can
+    // echo back — dodges any off-by-one from having Claude re-derive
+    // positions.
+    const items: { experienceIndex: number; bulletIndex: number; role: string; company: string; text: string }[] = [];
+    (profile.experience ?? []).forEach((exp, ei) => {
+      (exp.bullets ?? []).forEach((b, bi) => {
+        items.push({
+          experienceIndex: ei,
+          bulletIndex: bi,
+          role: exp.title,
+          company: exp.company,
+          text: b,
+        });
+      });
+    });
+
+    if (items.length === 0) {
+      return { bullets: [] };
+    }
+
+    const bulletBlock = items
+      .map(
+        (i) =>
+          `{"experienceIndex":${i.experienceIndex},"bulletIndex":${i.bulletIndex},"role":${JSON.stringify(i.role)},"company":${JSON.stringify(i.company)},"text":${JSON.stringify(i.text)}}`,
+      )
+      .join(",\n");
+
+    const prompt = `You are a résumé coach reviewing bullet points on a candidate's résumé. For each bullet, produce:
+  - feedback: ONE short sentence naming the specific weakness (or "Solid — no change needed" if already outcome-focused, quantified, and specific)
+  - suggested: a rewrite that keeps the same underlying claim BUT improves the pattern below. Do NOT invent numbers or projects. If you can't quantify honestly, focus on the specific action + outcome using only what the current bullet already implies.
+  - isWeak: true if the bullet is weak enough to warrant a rewrite, false otherwise
+
+The candidate has ${items.length} bullets across ${(profile.experience ?? []).length} roles. Return feedback for EVERY one, in the same order.
+
+WEAKNESS PATTERNS to catch and fix:
+  1. Describes activities ("worked on X", "responsible for Y") instead of outcomes ("shipped X which did Y")
+  2. Vague verbs ("helped", "managed", "supported") that don't convey what the person did
+  3. Missing metrics where the underlying claim implies one (scale, latency, revenue, users)
+  4. Starts with "Responsible for" or "Duties included"
+  5. Passive voice
+  6. Buzzwords without evidence ("synergized", "leveraged", "spearheaded")
+
+STRENGTH PATTERNS to preserve:
+  1. Strong verb + specific action + measurable outcome
+  2. Named systems, technologies, or metrics
+  3. Business impact stated in customer/company terms
+
+CANDIDATE
+Name: ${profile.fullName}
+Seniority: ${profile.seniority}
+Years: ${profile.yearsExperience}
+Top skills: ${(profile.skills ?? []).slice(0, 12).join(', ')}
+
+BULLETS (JSON array — one entry per bullet):
+[
+${bulletBlock}
+]
+
+Return STRICT JSON in this exact shape:
+{
+  "bullets": [
+    {
+      "experienceIndex": <int>,
+      "bulletIndex": <int>,
+      "original": <string, echo the input text>,
+      "feedback": <string>,
+      "suggested": <string, the rewrite>,
+      "isWeak": <boolean>
+    },
+    ...
+  ]
+}
+
+Rules — critical:
+- One entry per input bullet, same order, same experienceIndex/bulletIndex.
+- Never invent metrics, projects, teams, or outcomes not in the original.
+- If a bullet is already strong, set isWeak=false, feedback="Solid — no change needed", and suggested=original (verbatim).
+- Rewrite length ≤ 240 characters (résumés hate wrap).
+- First person implied — no "I " prefixes.
+- No markdown, no emojis in the rewritten bullets.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const parsed = extractJSON<{
+      bullets: {
+        experienceIndex: number;
+        bulletIndex: number;
+        original: string;
+        feedback: string;
+        suggested: string;
+        isWeak: boolean;
+      }[];
+    }>(message);
+    return { bullets: parsed.bullets ?? [] };
+  }
+
+  // ----------------------------------------------------------------
+  // estimateSalary — combine Adzuna histogram + user profile
+  // ----------------------------------------------------------------
+  async estimateSalary({
+    profile,
+    jobTitle,
+    company,
+    location,
+    histogram,
+    currency,
+  }: {
+    profile: UserProfile;
+    jobTitle: string;
+    company: string;
+    location: string;
+    histogram: { salary: number; vacancies: number }[];
+    currency: string;
+  }): Promise<{
+    rangeLow: number;
+    rangeMid: number;
+    rangeHigh: number;
+    currency: string;
+    confidence: 'low' | 'medium' | 'high';
+    explanation: string;
+    sampleSize: number;
+  }> {
+    const totalVacancies = histogram.reduce((s, h) => s + h.vacancies, 0);
+    const histogramLines = histogram
+      .filter((h) => h.vacancies > 0)
+      .slice(0, 30)
+      .map((h) => `  ${h.salary}: ${h.vacancies} postings`)
+      .join('\n');
+
+    const prompt = `You are helping a job candidate calibrate salary expectations for a specific role. You have Adzuna's market histogram (based on posted salaries in the region) AND the candidate's profile. Personalise the histogram into a specific range for this candidate.
+
+CANDIDATE
+Name: ${profile.fullName}
+Seniority: ${profile.seniority}
+Years of experience: ${profile.yearsExperience}
+Location: ${profile.location ?? '(unknown)'}
+Top skills: ${(profile.skills ?? []).slice(0, 12).join(', ')}
+Recent role: ${profile.experience?.[0]?.title ?? '(unknown)'} at ${profile.experience?.[0]?.company ?? '(unknown)'}
+
+THE ROLE
+Title: ${jobTitle}
+Company: ${company}
+Location: ${location}
+
+ADZUNA MARKET HISTOGRAM (${currency} — posted-salary distribution for ${jobTitle} in ${location}, ${totalVacancies} total postings)
+${histogramLines || '(no postings — histogram empty)'}
+
+Analyse:
+1. Where in the histogram does this candidate's seniority + years typically fall? (junior = bottom third, mid = middle, senior = upper third, staff/principal = top decile)
+2. Are their skills specialised enough to command a premium?
+3. Company tier — is ${company} known to pay above/below market? Use general knowledge. If unknown, treat as market rate.
+4. Location adjustment — is ${location} above or below the aggregate?
+
+Return STRICT JSON:
+{
+  "rangeLow": <int, ${currency}>,
+  "rangeMid": <int, ${currency}>,
+  "rangeHigh": <int, ${currency}>,
+  "currency": "${currency}",
+  "confidence": "low" | "medium" | "high",
+  "explanation": "<2-3 sentence plain-language reasoning. Say what data supports the range + note key uncertainties. No hype, no buzzwords.>",
+  "sampleSize": ${totalVacancies}
+}
+
+Confidence rubric:
+- high: 100+ postings in histogram AND candidate profile clearly aligns
+- medium: 20-100 postings OR candidate profile is niche
+- low: <20 postings OR ambiguous role/location signals
+
+Rules:
+- Range should be REALISTIC. rangeLow-rangeHigh should span roughly 30-50% of rangeMid — reflecting genuine market spread.
+- Cite the histogram in your explanation ("Based on ${totalVacancies} recent postings…").
+- Never invent specific company knowledge you don't have. If you're not sure ${company}'s pays above market, don't claim it does.`;
+
+    const message = await this.client.messages.create({
+      model: this.modelQuality,
+      max_tokens: 800,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    return extractJSON<{
+      rangeLow: number;
+      rangeMid: number;
+      rangeHigh: number;
+      currency: string;
+      confidence: 'low' | 'medium' | 'high';
+      explanation: string;
+      sampleSize: number;
+    }>(message);
+  }
 }
 
 /**

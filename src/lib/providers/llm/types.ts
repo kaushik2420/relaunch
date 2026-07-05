@@ -153,6 +153,50 @@ export interface LLMProvider {
     whyThisRole: string;
     coverLetterText: string;
   }>;
+
+  /**
+   * Analyse the user's résumé bullets and return per-bullet feedback +
+   * an outcome-focused rewrite suggestion. The user reviews each one
+   * and accepts/rejects individually; we only persist accepted rewrites.
+   *
+   * Returns one entry per bullet, in the same order as the input.
+   */
+  polishResume(input: {
+    profile: UserProfile;
+  }): Promise<{
+    bullets: {
+      experienceIndex: number; // which experience[] entry
+      bulletIndex: number;     // which bullet within it
+      original: string;
+      feedback: string;        // 1-line critique
+      suggested: string;       // rewrite
+      isWeak: boolean;         // true if the LLM thinks this needs work
+    }[];
+  }>;
+
+  /**
+   * Personalise Adzuna's market histogram into a specific range for
+   * THIS candidate + THIS role. Returns a range in the user's currency,
+   * a confidence tag, a plain-language explanation, and links to
+   * verification sources.
+   */
+  estimateSalary(input: {
+    profile: UserProfile;
+    jobTitle: string;
+    company: string;
+    location: string;
+    // Adzuna histogram: array of [salary_floor, vacancy_count] pairs
+    histogram: { salary: number; vacancies: number }[];
+    currency: string; // 'INR' | 'USD' etc.
+  }): Promise<{
+    rangeLow: number;
+    rangeMid: number;
+    rangeHigh: number;
+    currency: string;
+    confidence: 'low' | 'medium' | 'high';
+    explanation: string;
+    sampleSize: number;
+  }>;
 }
 
 export interface SmartFillField {

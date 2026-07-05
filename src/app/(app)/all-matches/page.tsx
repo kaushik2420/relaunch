@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { MatchAppliedButton } from "./MatchAppliedButton";
+import { SalaryCheck } from "./SalaryCheck";
 
 export const dynamic = "force-dynamic";
 
@@ -248,6 +249,11 @@ function MatchRowCard({
           </span>
         )}
         <MatchAppliedButton matchId={match.id} appliedAt={match.applied_at} />
+        <SalaryCheck
+          jobTitle={match.job_title}
+          company={match.company}
+          location=""
+        />
         <a
           href={match.apply_url}
           target="_blank"
