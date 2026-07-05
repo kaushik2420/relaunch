@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -151,7 +152,15 @@ export default async function AdminPage({
       </nav>
 
       <div className="mx-auto max-w-5xl px-6 py-10">
-        <h1 className="text-2xl font-bold">Relaunch admin</h1>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h1 className="text-2xl font-bold">Relaunch admin</h1>
+          <Link
+            href="/admin/leads"
+            className="text-sm font-semibold text-brand-700 hover:underline"
+          >
+            Distribution leads →
+          </Link>
+        </div>
 
         <CostPanel cost={cost} usage={usage} />
 

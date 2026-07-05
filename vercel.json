@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/boost-weekly",
       "schedule": "30 3 * * 1"
+    },
+    {
+      "path": "/api/cron/reddit-leads",
+      "schedule": "15 4 * * *"
     }
   ]
 }
