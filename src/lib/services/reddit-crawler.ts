@@ -14,7 +14,14 @@
  */
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
-const USER_AGENT = 'Relaunch/1.0 distribution-lead crawler by kaushikn2416';
+/**
+ * Reddit's docs require this exact User-Agent format:
+ *   <platform>:<app_id>:<version> (by /u/<reddit_username>)
+ * Deviating from it is one of the most common reasons Reddit
+ * returns 403 to otherwise-legitimate crawlers.
+ * See https://github.com/reddit-archive/reddit/wiki/API — 'API Rules'.
+ */
+const USER_AGENT = 'web:relaunch-distribution:v1.0.0 (by /u/kaushikn2416)';
 
 /**
  * Subreddits we scan. Ordered by signal quality — r/layoffs is the
@@ -144,21 +151,42 @@ export async function crawlRedditLeads(): Promise<CrawlSummary> {
 }
 
 async function fetchNewPosts(subreddit: string, limit: number): Promise<RedditPost[]> {
+  // old.reddit.com serves the same JSON but with more lenient bot
+  // protection than www.reddit.com — worth trying if the primary
+  // host starts returning 403.
   const url = `https://www.reddit.com/r/${subreddit}/new.json?limit=${limit}&raw_json=1`;
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'application/json',
-    },
-    // No cache — we want the freshest posts every crawl.
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} from Reddit`);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    throw new Error(`network error: ${(err as Error).message}`);
   }
-  const json = (await res.json()) as {
-    data?: { children?: { data: RedditPost }[] };
-  };
+
+  if (!res.ok) {
+    // Grab a snippet of the response body so we can see what Reddit
+    // actually said — an HTML rate-limit page, a JSON error, or
+    // Cloudflare's blocked-request page all look different.
+    let bodySnippet = '';
+    try {
+      bodySnippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
+    } catch {
+      // ignore
+    }
+    throw new Error(`HTTP ${res.status} · ${bodySnippet || '(empty body)'}`);
+  }
+
+  let json: { data?: { children?: { data: RedditPost }[] } };
+  try {
+    json = (await res.json()) as typeof json;
+  } catch (err) {
+    throw new Error(`invalid JSON: ${(err as Error).message}`);
+  }
   const children = json?.data?.children ?? [];
   return children.map((c) => c.data);
 }

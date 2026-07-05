@@ -29,7 +29,14 @@ type Lead = {
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: { status?: string };
+  searchParams: {
+    status?: string;
+    crawled?: string;
+    scanned?: string;
+    matched?: string;
+    inserted?: string;
+    err?: string;
+  };
 }) {
   const sb = createSupabaseServer();
   const {
@@ -86,6 +93,44 @@ export default async function LeadsPage({
             </SubmitButton>
           </form>
         </div>
+
+        {searchParams.crawled === '1' && (
+          <div
+            className={
+              searchParams.err
+                ? 'mt-5 rounded-xl border border-warn/40 bg-warn-soft p-4 text-sm'
+                : 'mt-5 rounded-xl border border-brand-500/30 bg-brand-50 p-4 text-sm'
+            }
+          >
+            <div className="font-semibold text-ink">
+              Crawl finished · scanned <strong>{searchParams.scanned}</strong>,
+              matched <strong>{searchParams.matched}</strong>, inserted{' '}
+              <strong>{searchParams.inserted}</strong> new{' '}
+              {Number(searchParams.inserted ?? '0') === 1 ? 'lead' : 'leads'}
+            </div>
+            {searchParams.inserted === '0' && !searchParams.err && (
+              <p className="mt-1 text-xs text-ink-soft">
+                Reddit returned posts but none matched the keyword pack today.
+                Try again later — new posts land at all hours.
+              </p>
+            )}
+            {searchParams.err && (
+              <>
+                <p className="mt-1 text-xs font-semibold text-warn">
+                  Errors while fetching:
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words rounded bg-white/60 p-2 font-mono text-[11px] text-ink">
+                  {searchParams.err}
+                </p>
+                <p className="mt-2 text-xs text-ink-soft">
+                  If you see 403s, Reddit is blocking our anonymous
+                  requests. See <code>docs/REDDIT_OAUTH.md</code> (or
+                  message Claude) to switch to a script-app OAuth token.
+                </p>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="mt-5 flex flex-wrap gap-2 text-xs">
           {(['new', 'replied', 'dismissed', 'irrelevant'] as Lead['status'][]).map(
