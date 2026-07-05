@@ -36,12 +36,46 @@ export async function GET() {
   );
 
   if (!oauthConfigured) {
+    // Test the RSS fallback path directly so we know it's alive.
+    const rssUrl = 'https://www.reddit.com/r/layoffs/new/.rss?limit=3';
+    const startedAt = Date.now();
+    let rssRes: Response;
+    try {
+      rssRes = await fetch(rssUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'application/atom+xml, application/xml, text/xml',
+        },
+        cache: 'no-store',
+      });
+    } catch (err) {
+      return NextResponse.json({
+        ok: false,
+        stage: 'rss-network',
+        error: (err as Error).message,
+        ms: Date.now() - startedAt,
+        hint:
+          'RSS fallback network error. The crawler runs in RSS mode when OAuth env vars are missing.',
+      });
+    }
+    const rssBody = await rssRes.text();
+    const entryCount = (rssBody.match(/<entry>/g) ?? []).length;
+    const titleMatch = rssBody.match(/<entry>[\s\S]*?<title>([\s\S]*?)<\/title>/);
     return NextResponse.json({
-      ok: false,
-      stage: 'oauth-not-configured',
+      ok: rssRes.ok && entryCount > 0,
+      stage: 'rss-fallback',
+      mode: 'RSS (OAuth not configured)',
+      status: rssRes.status,
+      ms: Date.now() - startedAt,
+      userAgent: USER_AGENT,
+      entryCount,
+      firstTitle: titleMatch ? titleMatch[1]?.slice(0, 160) : null,
+      bodySnippet: rssBody.slice(0, 500).replace(/\s+/g, ' '),
       hint:
-        'Reddit OAuth env vars are missing. Set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD in Vercel → Settings → Environment Variables. See docs/REDDIT_OAUTH.md for the registration walkthrough.',
-      configured: {
+        rssRes.ok && entryCount > 0
+          ? "RSS fallback is working. The crawler will use this path. Upgrade to OAuth later for engagement metrics (upvotes/comments) via docs/REDDIT_OAUTH.md."
+          : 'RSS came back empty or errored. Rare — the URL usually works anonymously. Check the status + body snippet.',
+      oauthConfigured: {
         REDDIT_CLIENT_ID: !!cfg.REDDIT_CLIENT_ID,
         REDDIT_CLIENT_SECRET: !!cfg.REDDIT_CLIENT_SECRET,
         REDDIT_USERNAME: !!cfg.REDDIT_USERNAME,

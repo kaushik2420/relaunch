@@ -231,10 +231,37 @@ export async function crawlRedditLeads(): Promise<CrawlSummary> {
   return summary;
 }
 
+/**
+ * Fetch newest posts from a subreddit. Uses OAuth when configured,
+ * falls back to public RSS otherwise. Both paths produce the same
+ * RedditPost[] shape so downstream matching + persistence code
+ * doesn't care which one was used.
+ *
+ * Signals we lose in the RSS path:
+ *  - `score` (upvotes) — RSS envelope doesn't include it. We default
+ *    to 0, which means engagement will look flat in the lead score;
+ *    recency + keyword hits still drive ranking.
+ *  - `num_comments` — same story.
+ *  - `stickied` / `removed_by_category` — RSS omits these too, but
+ *    they're rare on /new anyway.
+ */
 async function fetchNewPosts(subreddit: string, limit: number): Promise<RedditPost[]> {
-  // OAuth base URL is oauth.reddit.com — same path shape but requires
-  // the Bearer token in Authorization. Path uses /new.json (not just
-  // /new) so we still get the JSON response envelope.
+  const cfg = serverConfig();
+  const oauthConfigured = !!(
+    cfg.REDDIT_CLIENT_ID &&
+    cfg.REDDIT_CLIENT_SECRET &&
+    cfg.REDDIT_USERNAME &&
+    cfg.REDDIT_PASSWORD
+  );
+
+  if (oauthConfigured) {
+    return fetchViaOAuth(subreddit, limit);
+  }
+  return fetchViaRss(subreddit, limit);
+}
+
+/** OAuth path — full-fidelity JSON with score + comment count. */
+async function fetchViaOAuth(subreddit: string, limit: number): Promise<RedditPost[]> {
   const token = await getRedditToken();
   const url = `https://oauth.reddit.com/r/${subreddit}/new?limit=${limit}&raw_json=1`;
 
@@ -253,9 +280,6 @@ async function fetchNewPosts(subreddit: string, limit: number): Promise<RedditPo
   }
 
   if (res.status === 401) {
-    // Token got invalidated (rotated password, revoked app, etc.) —
-    // clear cache so the next call refetches. Bubble up so the summary
-    // banner shows a clear error.
     cachedToken = null;
     const snippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
     throw new Error(`401 unauthorized · token rejected · ${snippet}`);
@@ -279,6 +303,122 @@ async function fetchNewPosts(subreddit: string, limit: number): Promise<RedditPo
   }
   const children = json?.data?.children ?? [];
   return children.map((c) => c.data);
+}
+
+/**
+ * RSS fallback — hits /r/{sub}/.rss anonymously. Reddit still serves
+ * this without gating because RSS predates their app-platform push.
+ * Parsed with a lightweight regex extractor (no XML parser dep —
+ * Reddit's RSS format is stable enough for this).
+ */
+async function fetchViaRss(subreddit: string, limit: number): Promise<RedditPost[]> {
+  const url = `https://www.reddit.com/r/${subreddit}/new/.rss?limit=${limit}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/atom+xml, application/xml, text/xml',
+      },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    throw new Error(`RSS network error: ${(err as Error).message}`);
+  }
+
+  if (!res.ok) {
+    const snippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
+    throw new Error(`RSS HTTP ${res.status} · ${snippet || '(empty body)'}`);
+  }
+
+  const xml = await res.text();
+  return parseRedditRss(xml, subreddit);
+}
+
+/**
+ * Parse Reddit's Atom-flavoured RSS feed into RedditPost[]. Reddit's
+ * feed uses <entry> nodes with these fields we care about:
+ *   <id>t3_abc123</id>
+ *   <title>Just got laid off from...</title>
+ *   <content type="html">...HTML-escaped body...</content>
+ *   <author><name>/u/username</name></author>
+ *   <updated>2026-07-05T12:34:56+00:00</updated>
+ *   <link href="https://www.reddit.com/r/layoffs/comments/abc123/..."/>
+ *
+ * We avoid pulling in an XML parser dep — regex extraction is fine
+ * for a stable format and keeps the bundle lean.
+ */
+function parseRedditRss(xml: string, subreddit: string): RedditPost[] {
+  const entries: RedditPost[] = [];
+  const entryPattern = /<entry>([\s\S]*?)<\/entry>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = entryPattern.exec(xml)) !== null) {
+    const entry = match[1];
+    if (!entry) continue;
+    const idFull = pickTag(entry, 'id') || '';           // e.g. "t3_abc123"
+    const id = idFull.replace(/^t3_/, '');
+    if (!id) continue;
+
+    const title = decodeXml(pickTag(entry, 'title') || '').trim();
+    const author = pickTag(entry, 'name')?.replace(/^\/u\//, '') || '';
+    const updated = pickTag(entry, 'updated') || '';
+    const link = pickAttr(entry, 'link', 'href') || '';
+
+    // <content type="html">…</content> is HTML-escaped. Strip tags +
+    // decode entities so keyword matching sees plain text.
+    const contentHtml = pickTag(entry, 'content') || '';
+    const body = decodeXml(contentHtml)
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const createdSec = Math.floor(new Date(updated).getTime() / 1000);
+    if (!Number.isFinite(createdSec) || createdSec <= 0) continue;
+
+    entries.push({
+      id,
+      name: `t3_${id}`,
+      title,
+      selftext: body,
+      author,
+      permalink: link.replace(/^https?:\/\/[^/]+/, ''),
+      url: link,
+      created_utc: createdSec,
+      score: 0,                    // RSS doesn't expose it
+      num_comments: 0,             // ditto
+      subreddit,
+      subreddit_name_prefixed: `r/${subreddit}`,
+      over_18: false,
+      removed_by_category: null,
+      is_self: true,
+      stickied: false,
+    });
+  }
+  return entries;
+}
+
+function pickTag(source: string, tag: string): string | null {
+  // Non-greedy; handles both <tag>x</tag> and <tag type="…">x</tag>
+  const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`);
+  const m = source.match(re);
+  return m ? m[1] ?? null : null;
+}
+
+function pickAttr(source: string, tag: string, attr: string): string | null {
+  const re = new RegExp(`<${tag}[^>]*\\s${attr}="([^"]*)"`);
+  const m = source.match(re);
+  return m ? m[1] ?? null : null;
+}
+
+function decodeXml(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 }
 
 /**
