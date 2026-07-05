@@ -1,42 +1,49 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { JobCard } from './JobCard';
 import { JobTable } from './JobTable';
 import type { SheetMatchRow } from '@/lib/providers/sheets/types';
 
 /**
- * Wraps the matches listing in a client component so users can switch
- * between Card and Table views, filter by work mode / location /
- * match-percent, and paginate — all without a page reload.
+ * Wraps the matches listing in a client component so users can filter,
+ * sort, switch between Card and Table views, and paginate — all
+ * without a page reload.
  *
- * Parent does the "liked only" filtering + date sort server-side; this
- * component handles the rest.
+ * Filter model (as of the redesign):
+ *   • Everything collapses under a single Filter icon-button.
+ *   • Sub-sections: Source, Mode, Match, Location, Include applied.
+ *   • Multi-select WITHIN a section combines with OR (pick "Remote"
+ *     and "Hybrid" → show both).
+ *   • Cross-section combines with AND (Remote OR Hybrid AND Watchlist
+ *     AND 75%+).
+ *   • "Match" is a threshold, so it stays single-select.
+ *   • Sort lives in a separate icon-button; single-select.
  *
- * View preference persists in localStorage (key: relaunch.matches.view).
- * Filters reset on each visit (intentional — most users want a fresh
- * scan of today's batch). Page resets to 1 whenever any filter changes.
+ * View preference (cards vs table) persists in localStorage. Filters
+ * reset on each visit — daily job search is meant to feel fresh.
  */
 const PAGE_SIZE = 20;
 const VIEW_KEY = 'relaunch.matches.view';
 
 type ViewMode = 'cards' | 'table';
-type ModeFilter = 'all' | 'remote' | 'hybrid' | 'onsite';
-type MatchFilter = 'all' | '90' | '75' | '60';
+type ModeOption = 'remote' | 'hybrid' | 'onsite';
 type SortKey = 'best' | 'newest';
 
 export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   const [view, setView] = useState<ViewMode>('cards');
-  const [modeFilter, setModeFilter] = useState<ModeFilter>('all');
-  const [locationFilter, setLocationFilter] = useState<string>('all');
-  const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
+
+  // Multi-select filter state. Empty set = "no filter" (show all).
+  const [modeSet, setModeSet] = useState<Set<ModeOption>>(new Set());
+  const [sourceWatchlist, setSourceWatchlist] = useState(false);
+  const [locationSet, setLocationSet] = useState<Set<string>>(new Set());
+  // Match is a *threshold* not a set — you'd never say "roles between
+  // 75-89%". 0 means no floor.
+  const [matchThreshold, setMatchThreshold] = useState<0 | 60 | 75 | 90>(0);
+  const [hideApplied, setHideApplied] = useState(true);
+
   const [sortBy, setSortBy] = useState<SortKey>('best');
   const [page, setPage] = useState(1);
-  // New filters: hide applied by default, and source = all|watchlist
-  const [hideApplied, setHideApplied] = useState(true);
-  const [source, setSource] = useState<'all' | 'watchlist'>('all');
 
-  // Watchlist-aware: does the data even contain any watched companies?
-  // If not, the source filter is meaningless — hide it.
   const hasAnyWatched = useMemo(
     () => matches.some((m) => m.watched === true),
     [matches],
@@ -52,20 +59,16 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
     const saved = window.localStorage.getItem(VIEW_KEY);
     if (saved === 'cards' || saved === 'table') setView(saved);
   }, []);
-
-  // Persist on change.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(VIEW_KEY, view);
   }, [view]);
 
-  // Reset to page 1 whenever filters or sort change.
+  // Reset to page 1 whenever any filter changes.
   useEffect(() => {
     setPage(1);
-  }, [modeFilter, locationFilter, matchFilter, sortBy, hideApplied, source]);
+  }, [modeSet, sourceWatchlist, locationSet, matchThreshold, hideApplied, sortBy]);
 
-  // Unique locations present in the result set — derived from data so we
-  // don't show options that filter to zero rows.
   const locationOptions = useMemo(() => {
     const set = new Set<string>();
     for (const m of matches) {
@@ -76,27 +79,27 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
 
   const filtered = useMemo(() => {
     return matches.filter((m) => {
-      // Hide applied (default ON — user can toggle off to see them)
       if (hideApplied && m.applied) return false;
-      // Source filter — watchlist only?
-      if (source === 'watchlist' && !m.watched) return false;
-      // Work mode
-      if (modeFilter !== 'all') {
+      if (sourceWatchlist && !m.watched) return false;
+
+      // Mode: OR within category — empty set = pass.
+      if (modeSet.size > 0) {
         const mode = (m.mode || '').toLowerCase();
-        if (!mode.includes(modeFilter)) return false;
+        const matched = Array.from(modeSet).some((k) => mode.includes(k));
+        if (!matched) return false;
       }
-      // Location (exact match against the set we derived)
-      if (locationFilter !== 'all') {
-        if ((m.location || '').trim() !== locationFilter) return false;
+
+      // Location: OR within category — empty set = pass.
+      if (locationSet.size > 0) {
+        const loc = (m.location || '').trim();
+        if (!locationSet.has(loc)) return false;
       }
-      // Match-percent range
-      if (matchFilter !== 'all') {
-        const min = Number(matchFilter);
-        if (m.matchPercent < min) return false;
-      }
+
+      // Match threshold.
+      if (matchThreshold > 0 && m.matchPercent < matchThreshold) return false;
       return true;
     });
-  }, [matches, modeFilter, locationFilter, matchFilter, hideApplied, source]);
+  }, [matches, modeSet, sourceWatchlist, locationSet, matchThreshold, hideApplied]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -117,110 +120,67 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   const start = (safePage - 1) * PAGE_SIZE;
   const slice = sorted.slice(start, start + PAGE_SIZE);
 
-  const anyFilterActive =
-    modeFilter !== 'all' || locationFilter !== 'all' || matchFilter !== 'all';
+  // Count of active filters — drives the badge on the Filter icon.
+  const activeCount =
+    modeSet.size +
+    locationSet.size +
+    (sourceWatchlist ? 1 : 0) +
+    (matchThreshold > 0 ? 1 : 0) +
+    (!hideApplied && appliedCount > 0 ? 1 : 0);
+
+  function resetFilters() {
+    setModeSet(new Set());
+    setSourceWatchlist(false);
+    setLocationSet(new Set());
+    setMatchThreshold(0);
+    setHideApplied(true);
+  }
 
   return (
     <div>
-      {/* Filter + view toggle bar */}
+      {/* Filter + Sort + View toggle bar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {/* Hide applied — default ON, only shown if there's anything
-            applied to hide. */}
-        {appliedCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setHideApplied((v) => !v)}
-            className={`text-xs rounded-full border px-3 py-1 transition ${
-              hideApplied
-                ? 'border-brand-500 bg-brand-50 text-brand-700 font-semibold'
-                : 'border-line bg-surface text-ink-soft hover:border-brand-500/40'
-            }`}
-            aria-pressed={hideApplied}
-          >
-            {hideApplied
-              ? `🙈 Hiding ${appliedCount} applied`
-              : `👀 Showing applied (${appliedCount})`}
-          </button>
-        )}
+        <FilterMenu
+          activeCount={activeCount}
+          onReset={resetFilters}
+          hasAnyWatched={hasAnyWatched}
+          appliedCount={appliedCount}
+          sourceWatchlist={sourceWatchlist}
+          onSourceChange={setSourceWatchlist}
+          modeSet={modeSet}
+          onModeToggle={(v) => {
+            const next = new Set(modeSet);
+            if (next.has(v)) next.delete(v);
+            else next.add(v);
+            setModeSet(next);
+          }}
+          matchThreshold={matchThreshold}
+          onMatchChange={setMatchThreshold}
+          locationOptions={locationOptions}
+          locationSet={locationSet}
+          onLocationToggle={(v) => {
+            const next = new Set(locationSet);
+            if (next.has(v)) next.delete(v);
+            else next.add(v);
+            setLocationSet(next);
+          }}
+          hideApplied={hideApplied}
+          onHideAppliedChange={setHideApplied}
+        />
 
-        {/* Source = all | watchlist — only if user has any watched
-            matches in the current list. */}
-        {hasAnyWatched && (
-          <FilterChips
-            label="Source"
-            value={source}
-            onChange={(v) => setSource(v as 'all' | 'watchlist')}
-            options={[
-              { v: 'all', label: 'All sources' },
-              { v: 'watchlist', label: '⭐ Watchlist only' },
-            ]}
+        <SortMenu value={sortBy} onChange={setSortBy} />
+
+        {/* Active filter summary — a quick read of what's on. */}
+        {activeCount > 0 && (
+          <ActiveFilterSummary
+            modeSet={modeSet}
+            sourceWatchlist={sourceWatchlist}
+            locationSet={locationSet}
+            matchThreshold={matchThreshold}
+            hideApplied={hideApplied}
+            appliedCount={appliedCount}
+            onClear={resetFilters}
           />
-        )}
-
-        <FilterChips
-          label="Mode"
-          value={modeFilter}
-          onChange={(v) => setModeFilter(v as ModeFilter)}
-          options={[
-            { v: 'all', label: 'All' },
-            { v: 'remote', label: '🌐 Remote' },
-            { v: 'hybrid', label: '🏢 Hybrid' },
-            { v: 'onsite', label: '🪑 On-site' },
-          ]}
-        />
-
-        <FilterChips
-          label="Match"
-          value={matchFilter}
-          onChange={(v) => setMatchFilter(v as MatchFilter)}
-          options={[
-            { v: 'all', label: 'Any' },
-            { v: '90', label: '90%+' },
-            { v: '75', label: '75%+' },
-            { v: '60', label: '60%+' },
-          ]}
-        />
-
-        <FilterChips
-          label="Sort"
-          value={sortBy}
-          onChange={(v) => setSortBy(v as SortKey)}
-          options={[
-            { v: 'best', label: '🏆 Best match' },
-            { v: 'newest', label: '🕒 Newest' },
-          ]}
-        />
-
-        {locationOptions.length > 1 && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs uppercase tracking-wider text-ink-mute">Location</span>
-            <select
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-              className="text-xs rounded-full border border-line bg-surface px-3 py-1 hover:border-brand-500/40"
-            >
-              <option value="all">All</option>
-              {locationOptions.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {anyFilterActive && (
-          <button
-            type="button"
-            onClick={() => {
-              setModeFilter('all');
-              setLocationFilter('all');
-              setMatchFilter('all');
-            }}
-            className="text-xs text-ink-soft hover:text-ink underline"
-          >
-            Clear filters
-          </button>
         )}
 
         {/* View toggle pushed to the right */}
@@ -265,7 +225,6 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
         <JobTable matches={slice} />
       )}
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <Pagination
           page={safePage}
@@ -279,37 +238,401 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   );
 }
 
-function FilterChips<T extends string>({
-  label,
+/* -------------------------- Filter icon-button ------------------------ */
+
+function FilterMenu({
+  activeCount,
+  onReset,
+  hasAnyWatched,
+  appliedCount,
+  sourceWatchlist,
+  onSourceChange,
+  modeSet,
+  onModeToggle,
+  matchThreshold,
+  onMatchChange,
+  locationOptions,
+  locationSet,
+  onLocationToggle,
+  hideApplied,
+  onHideAppliedChange,
+}: {
+  activeCount: number;
+  onReset: () => void;
+  hasAnyWatched: boolean;
+  appliedCount: number;
+  sourceWatchlist: boolean;
+  onSourceChange: (v: boolean) => void;
+  modeSet: Set<ModeOption>;
+  onModeToggle: (v: ModeOption) => void;
+  matchThreshold: 0 | 60 | 75 | 90;
+  onMatchChange: (v: 0 | 60 | 75 | 90) => void;
+  locationOptions: string[];
+  locationSet: Set<string>;
+  onLocationToggle: (v: string) => void;
+  hideApplied: boolean;
+  onHideAppliedChange: (v: boolean) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+          activeCount > 0 || open
+            ? 'border-brand-500 bg-brand-50 text-brand-700'
+            : 'border-line bg-surface text-ink-soft hover:border-brand-500/40'
+        }`}
+      >
+        <FilterIcon />
+        Filter
+        {activeCount > 0 && (
+          <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-bold text-white">
+            {activeCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 z-20 mt-1 w-[320px] rounded-lg border border-line bg-white p-3 shadow-lg"
+        >
+          <div className="flex items-center justify-between border-b border-line pb-2">
+            <p className="text-xs font-semibold text-ink">Filters</p>
+            {activeCount > 0 && (
+              <button
+                type="button"
+                onClick={onReset}
+                className="text-[11px] text-brand-700 hover:underline"
+              >
+                Reset all
+              </button>
+            )}
+          </div>
+
+          {hasAnyWatched && (
+            <FilterSection label="Source">
+              <CheckboxRow
+                checked={sourceWatchlist}
+                onChange={(v) => onSourceChange(v)}
+              >
+                ⭐ Watchlist only
+              </CheckboxRow>
+            </FilterSection>
+          )}
+
+          <FilterSection label="Work mode">
+            {(
+              [
+                ['remote', '🌐 Remote'],
+                ['hybrid', '🏢 Hybrid'],
+                ['onsite', '🪑 On-site'],
+              ] as [ModeOption, string][]
+            ).map(([v, label]) => (
+              <CheckboxRow
+                key={v}
+                checked={modeSet.has(v)}
+                onChange={() => onModeToggle(v)}
+              >
+                {label}
+              </CheckboxRow>
+            ))}
+          </FilterSection>
+
+          <FilterSection label="Match strength">
+            {(
+              [
+                [0, 'Any match'],
+                [90, '90%+ only'],
+                [75, '75%+'],
+                [60, '60%+'],
+              ] as [0 | 60 | 75 | 90, string][]
+            ).map(([v, label]) => (
+              <RadioRow
+                key={v}
+                checked={matchThreshold === v}
+                onChange={() => onMatchChange(v)}
+              >
+                {label}
+              </RadioRow>
+            ))}
+          </FilterSection>
+
+          {locationOptions.length > 1 && (
+            <FilterSection label={`Location (${locationSet.size || 'all'})`}>
+              <div className="max-h-40 overflow-y-auto pr-1">
+                {locationOptions.map((loc) => (
+                  <CheckboxRow
+                    key={loc}
+                    checked={locationSet.has(loc)}
+                    onChange={() => onLocationToggle(loc)}
+                  >
+                    {loc}
+                  </CheckboxRow>
+                ))}
+              </div>
+            </FilterSection>
+          )}
+
+          {appliedCount > 0 && (
+            <FilterSection label="Applied roles">
+              <CheckboxRow
+                checked={!hideApplied}
+                onChange={(v) => onHideAppliedChange(!v)}
+              >
+                Include roles you already applied to ({appliedCount})
+              </CheckboxRow>
+            </FilterSection>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------- Sort icon-button ------------------------- */
+
+function SortMenu({
   value,
   onChange,
-  options,
+}: {
+  value: SortKey;
+  onChange: (v: SortKey) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+
+  const label = value === 'best' ? '🏆 Best match' : '🕒 Newest';
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+          open
+            ? 'border-brand-500 bg-brand-50 text-brand-700'
+            : 'border-line bg-surface text-ink-soft hover:border-brand-500/40'
+        }`}
+      >
+        <SortIcon />
+        Sort · <span className="font-semibold">{label}</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 z-20 mt-1 min-w-[180px] rounded-lg border border-line bg-white p-1 shadow-lg"
+        >
+          <RadioRow
+            checked={value === 'best'}
+            onChange={() => {
+              onChange('best');
+              setOpen(false);
+            }}
+          >
+            🏆 Best match
+          </RadioRow>
+          <RadioRow
+            checked={value === 'newest'}
+            onChange={() => {
+              onChange('newest');
+              setOpen(false);
+            }}
+          >
+            🕒 Newest
+          </RadioRow>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------- Shared pieces --------------------------- */
+
+function FilterSection({
+  label,
+  children,
 }: {
   label: string;
-  value: T;
-  onChange: (v: T) => void;
-  options: { v: T; label: string }[];
+  children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-xs uppercase tracking-wider text-ink-mute">{label}</span>
-      <div className="flex flex-wrap gap-1">
-        {options.map((o) => (
-          <button
-            key={o.v}
-            type="button"
-            onClick={() => onChange(o.v)}
-            className={`text-xs rounded-full border px-3 py-1 transition ${
-              value === o.v
-                ? 'border-brand-500 bg-brand-50 text-brand-700 font-semibold'
-                : 'border-line bg-surface text-ink-soft hover:border-brand-500/40'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+    <div className="mt-2 border-b border-line/60 pb-2 last:border-b-0 last:pb-0">
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-mute">
+        {label}
+      </p>
+      {children}
     </div>
+  );
+}
+
+function CheckboxRow({
+  checked,
+  onChange,
+  children,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs text-ink hover:bg-cream-50">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-3.5 w-3.5 accent-brand-500"
+      />
+      <span>{children}</span>
+    </label>
+  );
+}
+
+function RadioRow({
+  checked,
+  onChange,
+  children,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs text-ink hover:bg-cream-50">
+      <input
+        type="radio"
+        checked={checked}
+        onChange={onChange}
+        className="h-3.5 w-3.5 accent-brand-500"
+      />
+      <span>{children}</span>
+    </label>
+  );
+}
+
+function ActiveFilterSummary({
+  modeSet,
+  sourceWatchlist,
+  locationSet,
+  matchThreshold,
+  hideApplied,
+  appliedCount,
+  onClear,
+}: {
+  modeSet: Set<ModeOption>;
+  sourceWatchlist: boolean;
+  locationSet: Set<string>;
+  matchThreshold: 0 | 60 | 75 | 90;
+  hideApplied: boolean;
+  appliedCount: number;
+  onClear: () => void;
+}) {
+  const bits: string[] = [];
+  if (sourceWatchlist) bits.push('watchlist');
+  if (modeSet.size > 0) bits.push(Array.from(modeSet).join(' / '));
+  if (matchThreshold > 0) bits.push(`${matchThreshold}%+`);
+  if (locationSet.size > 0) {
+    bits.push(
+      locationSet.size <= 2
+        ? Array.from(locationSet).join(' / ')
+        : `${locationSet.size} locations`,
+    );
+  }
+  if (!hideApplied && appliedCount > 0) bits.push(`+ ${appliedCount} applied`);
+
+  if (bits.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-1 text-xs text-ink-soft">
+      <span className="opacity-70">Filtering:</span>
+      <span className="font-medium text-ink">{bits.join(' · ')}</span>
+      <button
+        type="button"
+        onClick={onClear}
+        className="ml-1 underline underline-offset-2 hover:text-ink"
+      >
+        clear
+      </button>
+    </div>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+    </svg>
+  );
+}
+
+function SortIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h13M3 12h9M3 18h5M17 8l4 4-4 4" />
+    </svg>
   );
 }
 
