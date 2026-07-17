@@ -111,21 +111,27 @@ export class CoresignalProvider implements JobProvider {
 /* ------------------------- helpers ------------------------- */
 
 /**
- * Build the ES DSL body. Deliberately loose:
- *   - MUST: title match on the user's query keywords
- *   - SHOULD (soft-boost, not required): country match, city match,
- *     recent date_posted, status=active
- * Sort by date_posted DESC when present, tiebreak by ES score.
+ * Build the ES DSL body.
  *
- * The previous version filtered on status=1 + date_posted range +
- * country all as MUST, which zero-ed out real matches — many
- * Coresignal jobs have date_posted=null (see their docs) and would
- * have been excluded by the range filter alone.
+ *   - MUST:   { match: { title: q } }  — plain match, proven to return
+ *             results against Coresignal's index. multi_match with
+ *             field-boost syntax (title^3) silently returned 0 hits
+ *             even though the same terms in `match` returned 1000+
+ *             (confirmed via the diagnostic probes). Whatever wrapper
+ *             they put in front of ES rejects the boost operator.
+ *   - SHOULD: match_phrase on country + city — pure scoring boost so
+ *             Bangalore/India rank ahead of random global roles. The
+ *             top COLLECT_CAP (20) get hydrated.
+ *
+ * Deliberately dropped from the request:
+ *   - `size`, `sort`, `from`, `_source` — Pydantic schema returns
+ *     HTTP 422 "extra_forbidden" on any body field other than `query`.
+ *   - `multi_match` — silently 0-hits, see above.
+ *   - `status=1` + date_posted range as SHOULD — didn't help recall
+ *     and every extra clause is a compatibility risk with their ES
+ *     wrapper. Rely on Coresignal's own dedup + freshness.
  */
 function buildDsl(q: JobSearchQuery): unknown {
-  const days = q.postedWithinDays ?? 14;
-  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-
   const countryFilter = detectCountry(q.locations);
   const cityShoulds = q.locations
     .map((l) => l.trim())
@@ -133,36 +139,20 @@ function buildDsl(q: JobSearchQuery): unknown {
     .slice(0, 6)
     .map((city) => ({ match_phrase: { city } }));
 
-  // MUST — the only hard requirement is that the title/description
-  // matches the user's query at all. Everything else is a soft boost.
   const must: unknown[] = [
-    {
-      multi_match: {
-        query: q.query,
-        fields: ['title^3', 'functions^2', 'description'],
-        operator: 'or',
-      },
-    },
+    { match: { title: q.query } },
   ];
 
-  const should: unknown[] = [
-    // Prefer active jobs but don't exclude inactive ones — recall
-    // matters more than perfection at search-only stage.
-    { term: { status: 1 } },
-    // Fresh > stale but many records have date_posted=null (their
-    // docs), so a soft boost rather than a hard filter.
-    { range: { date_posted: { gte: cutoff } } },
-  ];
-
+  const should: unknown[] = [];
   if (countryFilter) should.push({ match_phrase: { country: countryFilter } });
   if (cityShoulds.length > 0) should.push(...cityShoulds);
 
-  // Coresignal wraps ES with a Pydantic schema that ONLY accepts
-  // { query: ... } in the body — anything else (size, sort, from,
-  // _source) returns HTTP 422 "extra_forbidden". We rely on their
-  // default page size and cap client-side in the collect step via
-  // COLLECT_CAP.
-  return { query: { bool: { must, should } } };
+  // If no should clauses (rare — only when locations is empty), omit
+  // the array entirely; some ES wrappers reject empty arrays here.
+  const boolClause: Record<string, unknown> = { must };
+  if (should.length > 0) boolClause.should = should;
+
+  return { query: { bool: boolClause } };
 }
 
 function detectCountry(locations: string[]): string | null {
