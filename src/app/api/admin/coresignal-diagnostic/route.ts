@@ -79,15 +79,37 @@ export async function GET(req: NextRequest) {
   });
   const ms = Date.now() - start;
 
+  // If the primary query returned 0 hits, fire two probes to isolate
+  // the root cause without wasting a token bothering the user again:
+  //   probeMatchAll   → returns literally 1 job with no filters.
+  //                     If THIS is 0, the trial plan has no data.
+  //   probeTitleOnly  → returns matches on title only (no country,
+  //                     no functions, no description). If matchAll
+  //                     works but this is 0, the multi_match syntax
+  //                     is the issue.
+  let probeMatchAll: ProbeResult | null = null;
+  let probeTitleOnly: ProbeResult | null = null;
+  if (jobs.length === 0) {
+    probeMatchAll = await rawProbe(cfg.CORESIGNAL_API_KEY, {
+      query: { match_all: {} },
+      size: 1,
+    });
+    probeTitleOnly = await rawProbe(cfg.CORESIGNAL_API_KEY, {
+      query: { match: { title: q } },
+      size: 5,
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     stage: jobs.length > 0 ? 'success' : 'empty',
     query: { q, loc, postedWithinDays: 14, limit: 20 },
     ms,
     resultCount: jobs.length,
-    // Approx credit cost: 1 search + up to 20 collects if search
-    // returned only IDs. If search returned _source docs, just 1.
-    approxCreditsUsed: jobs.length > 0 ? `~${1 + Math.min(jobs.length, 20)}` : '~1',
+    approxCreditsUsed:
+      jobs.length > 0
+        ? `~${1 + Math.min(jobs.length, 20)}`
+        : `~${1 + (probeMatchAll ? 1 : 0) + (probeTitleOnly ? 1 : 0)}`,
     preview: jobs.slice(0, 3).map((j) => ({
       title: j.title,
       company: j.company,
@@ -99,9 +121,79 @@ export async function GET(req: NextRequest) {
       keywords: (j.keywords ?? []).slice(0, 8),
       snippet: (j.description ?? '').slice(0, 240),
     })),
+    probes: jobs.length === 0
+      ? {
+          matchAll: probeMatchAll,
+          titleOnly: probeTitleOnly,
+          verdict: diagnoseProbes(probeMatchAll, probeTitleOnly),
+        }
+      : undefined,
     hint:
-      jobs.length === 0
-        ? "No hits. Try a broader query (?q=engineer) or check if the trial plan includes India coverage. Coresignal's search is strict on title matching."
-        : `Got ${jobs.length} matches in ${ms}ms. If the preview looks good, add 'coresignal' to your JOB_PROVIDERS env var to enable it in the daily run.`,
+      jobs.length > 0
+        ? `Got ${jobs.length} matches in ${ms}ms. If the preview looks good, add 'coresignal' to your JOB_PROVIDERS env var to enable it in the daily run.`
+        : 'Zero hits — see probes.verdict below for the specific cause.',
   });
+}
+
+interface ProbeResult {
+  status: number;
+  hits: number;
+  firstTitle: string | null;
+  bodySnippet: string;
+}
+
+/** Fire a raw ES DSL request bypassing our provider's mapping so
+ *  we can see exactly what Coresignal returned. Used only when the
+ *  primary query returned 0 hits. */
+async function rawProbe(apiKey: string, dsl: unknown): Promise<ProbeResult> {
+  const res = await fetch(
+    'https://api.coresignal.com/cdapi/v2/job_multi_source/search/es_dsl',
+    {
+      method: 'POST',
+      headers: {
+        apikey: apiKey,
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify(dsl),
+      cache: 'no-store',
+    },
+  );
+  const text = await res.text();
+  let hits = 0;
+  let firstTitle: string | null = null;
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      hits = parsed.length;
+    } else if (parsed?.hits?.hits) {
+      hits = parsed.hits.hits.length;
+      firstTitle = parsed.hits.hits[0]?._source?.title ?? null;
+    }
+  } catch {
+    /* HTML error page — bodySnippet will show it */
+  }
+  return {
+    status: res.status,
+    hits,
+    firstTitle,
+    bodySnippet: text.slice(0, 400).replace(/\s+/g, ' '),
+  };
+}
+
+function diagnoseProbes(
+  matchAll: ProbeResult | null,
+  titleOnly: ProbeResult | null,
+): string {
+  if (!matchAll) return 'no probe run';
+  if (matchAll.status !== 200) {
+    return `Multi-source Jobs endpoint returned HTTP ${matchAll.status} on a bare match_all — trial plan likely doesn't include this dataset. Check dashboard.coresignal.com plan details or ask their support to enable Multi-source Jobs on the trial key.`;
+  }
+  if (matchAll.hits === 0) {
+    return "match_all returned 0 hits at status 200. The endpoint is reachable but the dataset is empty for your key. Almost certainly a plan-scope issue — the trial doesn't include Multi-source Jobs data. Contact Coresignal support.";
+  }
+  if (titleOnly && titleOnly.hits > 0) {
+    return `Data is present (match_all found jobs; title-only match on "${titleOnly.firstTitle ?? '???'}" also worked). Our production query is too strict — the multi_match fields boost syntax (title^3) or the country filter is likely the problem. Loosen the ES DSL in src/lib/providers/jobs/coresignal.ts buildDsl(). Consider using a simple { match: { title: q } } as MUST.`;
+  }
+  return `match_all works (${matchAll.hits} hits, first: "${matchAll.firstTitle ?? '???'}"), but title match returned 0. Coresignal's title field may need exact-phrase matching or a different query type. Try match_phrase in the provider.`;
 }
