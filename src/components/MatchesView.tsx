@@ -439,7 +439,11 @@ function FilterMenu({
             </FilterSection>
           )}
 
-          {providerOptions.length > 1 && (
+          {/* Source provider section — appears as soon as ANY match has
+              a populated source field. Older sheets built before the
+              Source column may show nothing here for a day or two; the
+              daily-runner backfills as it writes new rows. */}
+          {providerOptions.length >= 1 ? (
             <FilterSection
               label={`Source provider (${providerSet.size || 'all'})`}
             >
@@ -457,6 +461,14 @@ function FilterMenu({
                   </CheckboxRow>
                 ))}
               </div>
+            </FilterSection>
+          ) : (
+            <FilterSection label="Source provider">
+              <p className="px-1 py-2 text-[11px] text-ink-mute">
+                No source info yet — rows written before the last deploy
+                don&apos;t have a provider tag. The next daily run will
+                populate this so you can filter by provider.
+              </p>
             </FilterSection>
           )}
 
