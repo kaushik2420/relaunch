@@ -47,7 +47,7 @@ on the next push, or click Redeploy on the latest deployment).
 
 After the deploy lands (~60 seconds):
 
-1. Open `relaunch.app` in an incognito window
+1. Open `www.get-relaunch.com` in an incognito window
 2. Click around a few pages — landing → login → back to landing
 3. Go to PostHog → **Activity** in the left nav
 4. You should see `$pageview` events appearing in real time, one per
@@ -79,7 +79,7 @@ launching product. Turn them on now:
 
 ## 6. Point ad campaigns at UTM-tagged URLs
 
-Every link that lives outside relaunch.app should have UTMs. Without
+Every link that lives outside www.get-relaunch.com should have UTMs. Without
 them, all your Reddit / PH / LinkedIn traffic looks like generic
 "reddit.com" or "producthunt.com" referrals — impossible to attribute
 per ad or per post.

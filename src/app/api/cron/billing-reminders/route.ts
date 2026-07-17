@@ -64,10 +64,10 @@ function bodyFor(name: string, days: number): string {
       </p>
       <p style="margin:0 0 14px;font-size:14px;">
         If money is tight right now and you're still in the search,{' '}
-        reach out at <a href="mailto:hello@relaunch.app" style="color:#2C5239;">hello@relaunch.app</a>.
+        reach out at <a href="mailto:hello@get-relaunch.com" style="color:#2C5239;">hello@get-relaunch.com</a>.
         We have a hardship program. No questions asked.
       </p>
-      <a href="https://relaunch.app/billing" style="display:inline-block;background:#2C5239;color:white;padding:10px 16px;border-radius:8px;font-weight:600;text-decoration:none;">Continue on Relaunch Pro</a>
+      <a href="https://www.get-relaunch.com/billing" style="display:inline-block;background:#2C5239;color:white;padding:10px 16px;border-radius:8px;font-weight:600;text-decoration:none;">Continue on Relaunch Pro</a>
     </td></tr>
   </table></body></html>`;
 }

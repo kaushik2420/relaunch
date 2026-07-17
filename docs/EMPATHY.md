@@ -53,7 +53,7 @@ Not:
 
 Every paywall, every trial-end email, must include:
 
-> If money is tight right now, write to us at hello@relaunch.app — we have a hardship program for folks still in the search.
+> If money is tight right now, write to us at hello@get-relaunch.com — we have a hardship program for folks still in the search.
 
 This is not negotiable.
 

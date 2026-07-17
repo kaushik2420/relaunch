@@ -35,7 +35,7 @@ export default async function AppLayout({
         <div>
           <h1 className="text-2xl font-bold">Your account is paused</h1>
           <p className="mt-2 text-ink-soft">
-            Reach out to hello@relaunch.app if this is unexpected.
+            Reach out to hello@get-relaunch.com if this is unexpected.
           </p>
         </div>
       </div>

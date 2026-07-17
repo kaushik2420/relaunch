@@ -46,7 +46,7 @@ and add these four (Production + Preview + Development):
    this automatically on the next push, or click Redeploy on the
    latest deployment).
 2. Once live, sign into Relaunch as admin and hit
-   <https://relaunch.app/api/admin/reddit-diagnostic>.
+   <https://www.get-relaunch.com/api/admin/reddit-diagnostic>.
 3. Look for:
    - `stage: "success"`
    - `status: 200`

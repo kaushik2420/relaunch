@@ -29,7 +29,7 @@ Save for Production + Preview + Development. Trigger a redeploy
 Once deployed, sign into Relaunch as admin and open:
 
 ```
-https://relaunch.app/api/admin/coresignal-diagnostic?q=product+manager&loc=Bangalore
+https://www.get-relaunch.com/api/admin/coresignal-diagnostic?q=product+manager&loc=Bangalore
 ```
 
 You should get back JSON like:

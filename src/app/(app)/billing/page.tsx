@@ -80,7 +80,7 @@ export default async function BillingPage({
           <div className="mt-3">
             <EmpathyBanner icon="🌅" title={`Your trial ends in ${trial.daysLeft} ${trial.daysLeft === 1 ? 'day' : 'days'}.`}>
               We'd love to keep helping. If money is tight right now, write to us at{' '}
-              <a href="mailto:hello@relaunch.app" className="underline">hello@relaunch.app</a> — we have a
+              <a href="mailto:hello@get-relaunch.com" className="underline">hello@get-relaunch.com</a> — we have a
               hardship program for folks still in the job hunt.
             </EmpathyBanner>
           </div>
