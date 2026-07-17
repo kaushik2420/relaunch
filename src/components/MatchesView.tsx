@@ -36,6 +36,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   const [modeSet, setModeSet] = useState<Set<ModeOption>>(new Set());
   const [sourceWatchlist, setSourceWatchlist] = useState(false);
   const [locationSet, setLocationSet] = useState<Set<string>>(new Set());
+  const [providerSet, setProviderSet] = useState<Set<string>>(new Set());
   // Match is a *threshold* not a set — you'd never say "roles between
   // 75-89%". 0 means no floor.
   const [matchThreshold, setMatchThreshold] = useState<0 | 60 | 75 | 90>(0);
@@ -67,7 +68,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   // Reset to page 1 whenever any filter changes.
   useEffect(() => {
     setPage(1);
-  }, [modeSet, sourceWatchlist, locationSet, matchThreshold, hideApplied, sortBy]);
+  }, [modeSet, sourceWatchlist, locationSet, providerSet, matchThreshold, hideApplied, sortBy]);
 
   const locationOptions = useMemo(() => {
     const set = new Set<string>();
@@ -75,6 +76,22 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
       if (m.location && m.location.trim()) set.add(m.location.trim());
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [matches]);
+
+  // Providers that actually surfaced matches in the current list —
+  // pointless to show a `coresignal` filter option if the user has
+  // zero coresignal-sourced rows. Sorted by count desc so the biggest
+  // contributor floats to the top.
+  const providerOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of matches) {
+      const src = (m.source ?? '').trim().toLowerCase();
+      if (!src) continue;
+      counts.set(src, (counts.get(src) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
   }, [matches]);
 
   const filtered = useMemo(() => {
@@ -95,11 +112,19 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
         if (!locationSet.has(loc)) return false;
       }
 
+      // Provider: OR within category — empty set = pass. Rows with
+      // empty source (pre-source-column history) always pass so we
+      // don't accidentally hide legitimate matches.
+      if (providerSet.size > 0) {
+        const src = (m.source ?? '').trim().toLowerCase();
+        if (src && !providerSet.has(src)) return false;
+      }
+
       // Match threshold.
       if (matchThreshold > 0 && m.matchPercent < matchThreshold) return false;
       return true;
     });
-  }, [matches, modeSet, sourceWatchlist, locationSet, matchThreshold, hideApplied]);
+  }, [matches, modeSet, sourceWatchlist, locationSet, providerSet, matchThreshold, hideApplied]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -124,6 +149,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
   const activeCount =
     modeSet.size +
     locationSet.size +
+    providerSet.size +
     (sourceWatchlist ? 1 : 0) +
     (matchThreshold > 0 ? 1 : 0) +
     (!hideApplied && appliedCount > 0 ? 1 : 0);
@@ -132,6 +158,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
     setModeSet(new Set());
     setSourceWatchlist(false);
     setLocationSet(new Set());
+    setProviderSet(new Set());
     setMatchThreshold(0);
     setHideApplied(true);
   }
@@ -164,6 +191,14 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
             else next.add(v);
             setLocationSet(next);
           }}
+          providerOptions={providerOptions}
+          providerSet={providerSet}
+          onProviderToggle={(v) => {
+            const next = new Set(providerSet);
+            if (next.has(v)) next.delete(v);
+            else next.add(v);
+            setProviderSet(next);
+          }}
           hideApplied={hideApplied}
           onHideAppliedChange={setHideApplied}
         />
@@ -176,6 +211,7 @@ export function MatchesView({ matches }: { matches: SheetMatchRow[] }) {
             modeSet={modeSet}
             sourceWatchlist={sourceWatchlist}
             locationSet={locationSet}
+            providerSet={providerSet}
             matchThreshold={matchThreshold}
             hideApplied={hideApplied}
             appliedCount={appliedCount}
@@ -254,6 +290,9 @@ function FilterMenu({
   locationOptions,
   locationSet,
   onLocationToggle,
+  providerOptions,
+  providerSet,
+  onProviderToggle,
   hideApplied,
   onHideAppliedChange,
 }: {
@@ -270,6 +309,9 @@ function FilterMenu({
   locationOptions: string[];
   locationSet: Set<string>;
   onLocationToggle: (v: string) => void;
+  providerOptions: Array<{ name: string; count: number }>;
+  providerSet: Set<string>;
+  onProviderToggle: (v: string) => void;
   hideApplied: boolean;
   onHideAppliedChange: (v: boolean) => void;
 }) {
@@ -391,6 +433,27 @@ function FilterMenu({
                     onChange={() => onLocationToggle(loc)}
                   >
                     {loc}
+                  </CheckboxRow>
+                ))}
+              </div>
+            </FilterSection>
+          )}
+
+          {providerOptions.length > 1 && (
+            <FilterSection
+              label={`Source provider (${providerSet.size || 'all'})`}
+            >
+              <div className="max-h-40 overflow-y-auto pr-1">
+                {providerOptions.map((p) => (
+                  <CheckboxRow
+                    key={p.name}
+                    checked={providerSet.has(p.name)}
+                    onChange={() => onProviderToggle(p.name)}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="capitalize">{p.name}</span>
+                      <span className="text-[10px] text-ink-mute">{p.count}</span>
+                    </span>
                   </CheckboxRow>
                 ))}
               </div>
@@ -557,6 +620,7 @@ function ActiveFilterSummary({
   modeSet,
   sourceWatchlist,
   locationSet,
+  providerSet,
   matchThreshold,
   hideApplied,
   appliedCount,
@@ -565,6 +629,7 @@ function ActiveFilterSummary({
   modeSet: Set<ModeOption>;
   sourceWatchlist: boolean;
   locationSet: Set<string>;
+  providerSet: Set<string>;
   matchThreshold: 0 | 60 | 75 | 90;
   hideApplied: boolean;
   appliedCount: number;
@@ -574,6 +639,13 @@ function ActiveFilterSummary({
   if (sourceWatchlist) bits.push('watchlist');
   if (modeSet.size > 0) bits.push(Array.from(modeSet).join(' / '));
   if (matchThreshold > 0) bits.push(`${matchThreshold}%+`);
+  if (providerSet.size > 0) {
+    bits.push(
+      providerSet.size <= 2
+        ? Array.from(providerSet).join(' / ')
+        : `${providerSet.size} providers`,
+    );
+  }
   if (locationSet.size > 0) {
     bits.push(
       locationSet.size <= 2

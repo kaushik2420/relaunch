@@ -33,6 +33,10 @@ export interface SheetMatchRow {
    *  in the user's watched_companies list. Not present in the sheet
    *  itself; populated by the join when the page loads. */
   watched?: boolean;
+  /** Which job provider surfaced this posting (adzuna, coresignal,
+   *  jsearch, greenhouse, etc.). Written to sheet column S. Empty
+   *  for pre-existing rows created before the source column landed. */
+  source?: string;
 }
 
 export interface SheetsProvider {

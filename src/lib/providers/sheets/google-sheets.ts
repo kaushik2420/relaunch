@@ -28,6 +28,7 @@ const HEADERS = [
   'Resume (Editable)',    // column P — editable .docx link
   'Cover Letter (PDF)',   // column Q
   'Cover Letter (Editable)', // column R — editable .docx link
+  'Source',               // column S — provider name (adzuna, coresignal, etc.)
 ];
 
 export class GoogleSheetsProvider implements SheetsProvider {
@@ -166,6 +167,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
       m.tailoredResumeDocUrl ?? '', // column P — editable resume .docx
       m.coverLetterUrl ?? '',       // column Q — cover letter PDF
       m.coverLetterDocUrl ?? '',    // column R — editable cover letter .docx
+      m.job.source ?? '',            // column S — which provider found this
     ]);
     await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -196,11 +198,12 @@ export class GoogleSheetsProvider implements SheetsProvider {
     const sheets = this.sheetsClient(refreshToken);
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      // Skip the header row (A1). Columns A:R — O is Reaction, P is the
-      // editable resume .docx, Q/R are the cover-letter links. Sheets
-      // created before a column was added just return short rows; we
-      // default missing cells to '' below.
-      range: 'Daily Matches!A2:R',
+      // Skip the header row (A1). Columns A:S — O is Reaction, P is the
+      // editable resume .docx, Q/R are cover-letter links, S is the
+      // provider that surfaced this posting. Sheets created before a
+      // column was added just return short rows; we default missing
+      // cells to '' below.
+      range: 'Daily Matches!A2:S',
     });
     const rows = res.data.values ?? [];
 
@@ -231,6 +234,7 @@ export class GoogleSheetsProvider implements SheetsProvider {
           tailoredResumeDocUrl: (r[15] ?? '').toString(),
           coverLetterUrl: (r[16] ?? '').toString(),
           coverLetterDocUrl: (r[17] ?? '').toString(),
+          source: (r[18] ?? '').toString(),
         };
       })
       .filter((r): r is SheetMatchRow => r !== null && (!!r.company || !!r.role));
