@@ -32,65 +32,38 @@ export class CoresignalProvider implements JobProvider {
       return [];
     }
 
-    const dsl = buildDsl(q);
-    let ids: number[] = [];
-    let hydrated: RawJob[] = [];
+    // First pass: strict — includes country filter in MUST for
+    // location relevance.
+    let result = await runSearch(cfg.CORESIGNAL_API_KEY, q, {
+      skipCountryFilter: false,
+    });
 
-    // ES DSL search. Coresignal usually returns an array of numeric IDs;
-    // some deployments return full _source docs — handle both shapes.
-    try {
-      const res = await fetch(`${BASE}/v2/job_multi_source/search/es_dsl`, {
-        method: 'POST',
-        headers: {
-          apikey: cfg.CORESIGNAL_API_KEY,
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify(dsl),
-        cache: 'no-store',
-      });
-      if (!res.ok) {
-        const snippet = (await res.text()).slice(0, 400).replace(/\s+/g, ' ');
-        console.error(
-          `[coresignal] search HTTP ${res.status} · body: ${snippet}`,
-        );
-        // Common 4xx meanings — surface them plainly so Vercel logs
-        // aren't a puzzle:
-        //   401 → wrong / missing API key
-        //   403 → key valid but Multi-source Jobs isn't in your plan
-        //   404 → wrong endpoint (should never happen; hardcoded)
-        //   429 → rate limited (we send 1 search per call — unlikely)
-        return [];
-      }
-      const parsed = (await res.json()) as unknown;
-      const [maybeIds, maybeHydrated] = normaliseSearchResponse(parsed);
-      ids = maybeIds;
-      hydrated = maybeHydrated;
-      console.log(
-        `[coresignal] search "${q.query}" @ ${q.locations.join('/')} → ${ids.length} IDs, ${hydrated.length} hydrated`,
+    // Fallback: if the strict query drew a blank AND we had a country
+    // filter to begin with, retry without it. Costs one extra search
+    // call (~1 credit) but rescues niche titles in low-coverage
+    // regions.
+    if (
+      result.ids.length === 0 &&
+      result.hydrated.length === 0 &&
+      detectCountry(q.locations) !== null
+    ) {
+      console.warn(
+        `[coresignal] strict query returned 0 for "${q.query}" @ ${q.locations.join('/')} — retrying without country filter`,
       );
-      if (ids.length === 0 && hydrated.length === 0) {
-        // Print the DSL we sent so it's easy to grab from Vercel logs
-        // and paste into Postman / the Coresignal search-preview tool
-        console.warn(
-          '[coresignal] zero hits — DSL was:',
-          JSON.stringify(dsl),
-        );
-      }
-    } catch (err) {
-      console.error('[coresignal] search failed', err);
-      return [];
+      result = await runSearch(cfg.CORESIGNAL_API_KEY, q, {
+        skipCountryFilter: true,
+      });
     }
 
     // Path A: search returned full docs → skip collect entirely
-    if (hydrated.length > 0) {
-      const mapped = hydrated.map(toJobPosting).filter(nonNull);
+    if (result.hydrated.length > 0) {
+      const mapped = result.hydrated.map(toJobPosting).filter(nonNull);
       console.log(`[coresignal] hydrated ${mapped.length} jobs (no collect)`);
       return mapped;
     }
 
     // Path B: search returned IDs → collect up to COLLECT_CAP of them
-    const trimmed = ids.slice(0, COLLECT_CAP);
+    const trimmed = result.ids.slice(0, COLLECT_CAP);
     const collected = await Promise.allSettled(
       trimmed.map((id) => collectOne(cfg.CORESIGNAL_API_KEY!, id)),
     );
@@ -102,9 +75,58 @@ export class CoresignalProvider implements JobProvider {
       }
     }
     console.log(
-      `[coresignal] search → ${ids.length} IDs, collected ${trimmed.length}, mapped ${jobs.length}`,
+      `[coresignal] search → ${result.ids.length} IDs, collected ${trimmed.length}, mapped ${jobs.length}`,
     );
     return jobs;
+  }
+}
+
+/**
+ * Single search invocation. Returns whichever shape Coresignal
+ * responded with (IDs or hydrated docs), or empty arrays on error.
+ * Called at most twice per search — once strict, once loose.
+ */
+async function runSearch(
+  apiKey: string,
+  q: JobSearchQuery,
+  opts: { skipCountryFilter: boolean },
+): Promise<{ ids: number[]; hydrated: RawJob[] }> {
+  const dsl = buildDsl(q, opts);
+  try {
+    const res = await fetch(`${BASE}/v2/job_multi_source/search/es_dsl`, {
+      method: 'POST',
+      headers: {
+        apikey: apiKey,
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify(dsl),
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const snippet = (await res.text()).slice(0, 400).replace(/\s+/g, ' ');
+      console.error(
+        `[coresignal] search HTTP ${res.status} · body: ${snippet}`,
+      );
+      //   401 → wrong / missing API key
+      //   403 → plan doesn't include Multi-source Jobs
+      //   422 → DSL body has a field their Pydantic schema forbids
+      //   429 → rate limited
+      return { ids: [], hydrated: [] };
+    }
+    const parsed = (await res.json()) as unknown;
+    const [ids, hydrated] = normaliseSearchResponse(parsed);
+    const label = opts.skipCountryFilter ? 'loose' : 'strict';
+    console.log(
+      `[coresignal] ${label} search "${q.query}" @ ${q.locations.join('/')} → ${ids.length} IDs, ${hydrated.length} hydrated`,
+    );
+    if (ids.length === 0 && hydrated.length === 0) {
+      console.warn('[coresignal] zero hits — DSL was:', JSON.stringify(dsl));
+    }
+    return { ids, hydrated };
+  } catch (err) {
+    console.error('[coresignal] search failed', err);
+    return { ids: [], hydrated: [] };
   }
 }
 
@@ -113,26 +135,30 @@ export class CoresignalProvider implements JobProvider {
 /**
  * Build the ES DSL body.
  *
- *   - MUST:   { match: { title: q } }  — plain match, proven to return
- *             results against Coresignal's index. multi_match with
- *             field-boost syntax (title^3) silently returned 0 hits
- *             even though the same terms in `match` returned 1000+
- *             (confirmed via the diagnostic probes). Whatever wrapper
- *             they put in front of ES rejects the boost operator.
- *   - SHOULD: match_phrase on country + city — pure scoring boost so
- *             Bangalore/India rank ahead of random global roles. The
- *             top COLLECT_CAP (20) get hydrated.
+ *   - MUST:   { match: { title: q } } + { match_phrase: { country } }
+ *             Plain `match` on title works (proven via probes: 1000+
+ *             hits). Country MUST-filter is critical because
+ *             Coresignal returns a globally-ranked ID list and we
+ *             only hydrate the top COLLECT_CAP (20). Without a hard
+ *             country filter, "engineer" in the US/UK/Malaysia drowns
+ *             out Bangalore roles in the top slice.
+ *   - SHOULD: match_phrase on city — pure scoring boost so Bangalore
+ *             ranks above other Indian cities in the hydrated slice.
  *
  * Deliberately dropped from the request:
  *   - `size`, `sort`, `from`, `_source` — Pydantic schema returns
  *     HTTP 422 "extra_forbidden" on any body field other than `query`.
- *   - `multi_match` — silently 0-hits, see above.
- *   - `status=1` + date_posted range as SHOULD — didn't help recall
- *     and every extra clause is a compatibility risk with their ES
- *     wrapper. Rely on Coresignal's own dedup + freshness.
+ *   - `multi_match` with field boosts (title^3) — silently 0-hits.
+ *   - `status=1` + date_posted range — didn't help recall and every
+ *     extra clause is a compatibility risk with their ES wrapper.
+ *     Rely on Coresignal's own dedup + freshness.
+ *
+ * Fallback path: if the country-filtered query returns 0 results
+ * (rare — e.g. very niche title in a country with little coverage),
+ * the caller retries without country. See search() below.
  */
-function buildDsl(q: JobSearchQuery): unknown {
-  const countryFilter = detectCountry(q.locations);
+function buildDsl(q: JobSearchQuery, opts?: { skipCountryFilter?: boolean }): unknown {
+  const countryFilter = opts?.skipCountryFilter ? null : detectCountry(q.locations);
   const cityShoulds = q.locations
     .map((l) => l.trim())
     .filter(Boolean)
@@ -142,13 +168,13 @@ function buildDsl(q: JobSearchQuery): unknown {
   const must: unknown[] = [
     { match: { title: q.query } },
   ];
+  if (countryFilter) {
+    must.push({ match_phrase: { country: countryFilter } });
+  }
 
   const should: unknown[] = [];
-  if (countryFilter) should.push({ match_phrase: { country: countryFilter } });
   if (cityShoulds.length > 0) should.push(...cityShoulds);
 
-  // If no should clauses (rare — only when locations is empty), omit
-  // the array entirely; some ES wrappers reject empty arrays here.
   const boolClause: Record<string, unknown> = { must };
   if (should.length > 0) boolClause.should = should;
 
