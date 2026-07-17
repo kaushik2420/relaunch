@@ -50,13 +50,33 @@ export class CoresignalProvider implements JobProvider {
         cache: 'no-store',
       });
       if (!res.ok) {
-        const snippet = (await res.text()).slice(0, 240).replace(/\s+/g, ' ');
-        throw new Error(`search HTTP ${res.status} · ${snippet}`);
+        const snippet = (await res.text()).slice(0, 400).replace(/\s+/g, ' ');
+        console.error(
+          `[coresignal] search HTTP ${res.status} · body: ${snippet}`,
+        );
+        // Common 4xx meanings — surface them plainly so Vercel logs
+        // aren't a puzzle:
+        //   401 → wrong / missing API key
+        //   403 → key valid but Multi-source Jobs isn't in your plan
+        //   404 → wrong endpoint (should never happen; hardcoded)
+        //   429 → rate limited (we send 1 search per call — unlikely)
+        return [];
       }
       const parsed = (await res.json()) as unknown;
       const [maybeIds, maybeHydrated] = normaliseSearchResponse(parsed);
       ids = maybeIds;
       hydrated = maybeHydrated;
+      console.log(
+        `[coresignal] search "${q.query}" @ ${q.locations.join('/')} → ${ids.length} IDs, ${hydrated.length} hydrated`,
+      );
+      if (ids.length === 0 && hydrated.length === 0) {
+        // Print the DSL we sent so it's easy to grab from Vercel logs
+        // and paste into Postman / the Coresignal search-preview tool
+        console.warn(
+          '[coresignal] zero hits — DSL was:',
+          JSON.stringify(dsl),
+        );
+      }
     } catch (err) {
       console.error('[coresignal] search failed', err);
       return [];
@@ -91,20 +111,22 @@ export class CoresignalProvider implements JobProvider {
 /* ------------------------- helpers ------------------------- */
 
 /**
- * Build the ES DSL body. Filter by:
- *   - status = 1 (active job cluster)
- *   - country matches India OR the user's preferred country
- *   - title matches the query (multi_match against title + description)
- *   - date_posted within last N days
- * Sorted by date_posted DESC so freshest hits come back first.
+ * Build the ES DSL body. Deliberately loose:
+ *   - MUST: title match on the user's query keywords
+ *   - SHOULD (soft-boost, not required): country match, city match,
+ *     recent date_posted, status=active
+ * Sort by date_posted DESC when present, tiebreak by ES score.
+ *
+ * The previous version filtered on status=1 + date_posted range +
+ * country all as MUST, which zero-ed out real matches — many
+ * Coresignal jobs have date_posted=null (see their docs) and would
+ * have been excluded by the range filter alone.
  */
 function buildDsl(q: JobSearchQuery): unknown {
   const days = q.postedWithinDays ?? 14;
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
   const size = Math.min(q.limit ?? 25, 50);
 
-  // Location filter — Coresignal has `country` + `city`. If the user
-  // gave us "Bangalore" or "Bengaluru", match on that OR India-wide.
   const countryFilter = detectCountry(q.locations);
   const cityShoulds = q.locations
     .map((l) => l.trim())
@@ -112,30 +134,40 @@ function buildDsl(q: JobSearchQuery): unknown {
     .slice(0, 6)
     .map((city) => ({ match_phrase: { city } }));
 
+  // MUST — the only hard requirement is that the title/description
+  // matches the user's query at all. Everything else is a soft boost.
   const must: unknown[] = [
-    { term: { status: 1 } },
     {
       multi_match: {
         query: q.query,
         fields: ['title^3', 'functions^2', 'description'],
+        // Fuzzy zero — Coresignal's tokenizer already handles stems
+        operator: 'or',
       },
     },
+  ];
+
+  const should: unknown[] = [
+    // Prefer active jobs but don't exclude inactive ones (recall matters
+    // more than perfection at search-only stage; we won't re-collect
+    // deleted ones anyway because their URLs 404 downstream).
+    { term: { status: 1 } },
+    // Fresh > stale — but don't hard-filter, since Coresignal reports
+    // many records with date_posted=null. Range as a should still lifts
+    // dated-recent hits above older/undated ones.
     { range: { date_posted: { gte: cutoff } } },
   ];
 
-  if (countryFilter) {
-    must.push({ match_phrase: { country: countryFilter } });
-  }
-
-  if (cityShoulds.length > 0) {
-    // OR across the user's preferred cities. Not required if country
-    // matched — helps recall when someone selected multiple cities.
-    must.push({ bool: { should: cityShoulds, minimum_should_match: 1 } });
-  }
+  if (countryFilter) should.push({ match_phrase: { country: countryFilter } });
+  if (cityShoulds.length > 0) should.push(...cityShoulds);
 
   return {
-    query: { bool: { must } },
-    sort: [{ date_posted: 'desc' }],
+    query: { bool: { must, should } },
+    sort: [
+      // date_posted first if present, ES score as tiebreak
+      { date_posted: { order: 'desc', missing: '_last' } },
+      '_score',
+    ],
     size,
   };
 }
