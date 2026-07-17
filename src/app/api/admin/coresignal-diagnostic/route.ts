@@ -24,16 +24,39 @@ export const maxDuration = 30;
  * even a barely-working setup should return >0 results.
  */
 export async function GET(req: NextRequest) {
-  const sb = createSupabaseServer();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'not signed in' }, { status: 401 });
-  if ((user.email ?? '').toLowerCase() !== serverConfig().ADMIN_EMAIL.toLowerCase()) {
-    return NextResponse.json({ error: 'admin only' }, { status: 403 });
+  const cfg = serverConfig();
+
+  // Two auth paths:
+  //  1. Browser session with the ADMIN_EMAIL user (default).
+  //  2. Header `x-cron-secret: <CRON_SECRET>` — lets you hit this
+  //     from curl/Postman when the browser session isn't cooperating.
+  const cronSecret = req.headers.get('x-cron-secret') ?? '';
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const hasCronAuth =
+    (cronSecret && cronSecret === cfg.CRON_SECRET) ||
+    (bearer && bearer === cfg.CRON_SECRET);
+
+  if (!hasCronAuth) {
+    const sb = createSupabaseServer();
+    const {
+      data: { user },
+    } = await sb.auth.getUser();
+    if (!user) {
+      return NextResponse.json({
+        error: 'not signed in',
+        hint: 'Sign into Relaunch first, or pass `x-cron-secret: <CRON_SECRET>` header.',
+      }, { status: 401 });
+    }
+    if ((user.email ?? '').toLowerCase() !== cfg.ADMIN_EMAIL.toLowerCase()) {
+      return NextResponse.json({
+        error: 'admin only',
+        hint: `Signed in as "${user.email}", but ADMIN_EMAIL is "${cfg.ADMIN_EMAIL}". Sign in with the admin email, update ADMIN_EMAIL in Vercel, or use x-cron-secret header.`,
+        signedInAs: user.email,
+        expectedAdmin: cfg.ADMIN_EMAIL,
+      }, { status: 403 });
+    }
   }
 
-  const cfg = serverConfig();
   if (!cfg.CORESIGNAL_API_KEY) {
     return NextResponse.json({
       ok: false,

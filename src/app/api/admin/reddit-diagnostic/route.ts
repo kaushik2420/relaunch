@@ -15,19 +15,39 @@ const USER_AGENT = 'web:relaunch-distribution:v1.0.0 (by /u/kaushikn2416)';
  * Admin-only. Returns JSON so you can inspect it directly in the
  * browser tab or from the terminal via curl.
  */
-export async function GET() {
-  const sb = createSupabaseServer();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
-  }
-  if ((user.email ?? '').toLowerCase() !== serverConfig().ADMIN_EMAIL.toLowerCase()) {
-    return NextResponse.json({ error: 'Admin only.' }, { status: 403 });
+export async function GET(req: Request) {
+  const cfg = serverConfig();
+
+  // Accept EITHER a signed-in admin session OR the x-cron-secret
+  // header, so this endpoint stays usable from curl when the
+  // browser session isn't cooperating.
+  const cronSecret = req.headers.get('x-cron-secret') ?? '';
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const hasCronAuth =
+    (cronSecret && cronSecret === cfg.CRON_SECRET) ||
+    (bearer && bearer === cfg.CRON_SECRET);
+
+  if (!hasCronAuth) {
+    const sb = createSupabaseServer();
+    const {
+      data: { user },
+    } = await sb.auth.getUser();
+    if (!user) {
+      return NextResponse.json({
+        error: 'Not signed in.',
+        hint: 'Sign into Relaunch first, or pass `x-cron-secret: <CRON_SECRET>` header.',
+      }, { status: 401 });
+    }
+    if ((user.email ?? '').toLowerCase() !== cfg.ADMIN_EMAIL.toLowerCase()) {
+      return NextResponse.json({
+        error: 'Admin only.',
+        hint: `Signed in as "${user.email}", ADMIN_EMAIL is "${cfg.ADMIN_EMAIL}".`,
+        signedInAs: user.email,
+        expectedAdmin: cfg.ADMIN_EMAIL,
+      }, { status: 403 });
+    }
   }
 
-  const cfg = serverConfig();
   const oauthConfigured = !!(
     cfg.REDDIT_CLIENT_ID &&
     cfg.REDDIT_CLIENT_SECRET &&
