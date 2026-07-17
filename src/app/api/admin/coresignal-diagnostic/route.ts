@@ -90,13 +90,14 @@ export async function GET(req: NextRequest) {
   let probeMatchAll: ProbeResult | null = null;
   let probeTitleOnly: ProbeResult | null = null;
   if (jobs.length === 0) {
+    // Coresignal's schema rejects any body field other than `query`
+    // (size / sort / from all return HTTP 422). Both probes here send
+    // only { query: ... } and rely on the default page size.
     probeMatchAll = await rawProbe(cfg.CORESIGNAL_API_KEY, {
       query: { match_all: {} },
-      size: 1,
     });
     probeTitleOnly = await rawProbe(cfg.CORESIGNAL_API_KEY, {
       query: { match: { title: q } },
-      size: 5,
     });
   }
 

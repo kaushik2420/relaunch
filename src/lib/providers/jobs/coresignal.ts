@@ -125,7 +125,6 @@ export class CoresignalProvider implements JobProvider {
 function buildDsl(q: JobSearchQuery): unknown {
   const days = q.postedWithinDays ?? 14;
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-  const size = Math.min(q.limit ?? 25, 50);
 
   const countryFilter = detectCountry(q.locations);
   const cityShoulds = q.locations
@@ -141,35 +140,29 @@ function buildDsl(q: JobSearchQuery): unknown {
       multi_match: {
         query: q.query,
         fields: ['title^3', 'functions^2', 'description'],
-        // Fuzzy zero — Coresignal's tokenizer already handles stems
         operator: 'or',
       },
     },
   ];
 
   const should: unknown[] = [
-    // Prefer active jobs but don't exclude inactive ones (recall matters
-    // more than perfection at search-only stage; we won't re-collect
-    // deleted ones anyway because their URLs 404 downstream).
+    // Prefer active jobs but don't exclude inactive ones — recall
+    // matters more than perfection at search-only stage.
     { term: { status: 1 } },
-    // Fresh > stale — but don't hard-filter, since Coresignal reports
-    // many records with date_posted=null. Range as a should still lifts
-    // dated-recent hits above older/undated ones.
+    // Fresh > stale but many records have date_posted=null (their
+    // docs), so a soft boost rather than a hard filter.
     { range: { date_posted: { gte: cutoff } } },
   ];
 
   if (countryFilter) should.push({ match_phrase: { country: countryFilter } });
   if (cityShoulds.length > 0) should.push(...cityShoulds);
 
-  return {
-    query: { bool: { must, should } },
-    sort: [
-      // date_posted first if present, ES score as tiebreak
-      { date_posted: { order: 'desc', missing: '_last' } },
-      '_score',
-    ],
-    size,
-  };
+  // Coresignal wraps ES with a Pydantic schema that ONLY accepts
+  // { query: ... } in the body — anything else (size, sort, from,
+  // _source) returns HTTP 422 "extra_forbidden". We rely on their
+  // default page size and cap client-side in the collect step via
+  // COLLECT_CAP.
+  return { query: { bool: { must, should } } };
 }
 
 function detectCountry(locations: string[]): string | null {
