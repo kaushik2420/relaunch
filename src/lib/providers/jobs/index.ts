@@ -11,6 +11,7 @@ import { LeverProvider } from './lever';
 import { WorkableProvider } from './workable';
 import { SmartRecruitersProvider } from './smartrecruiters';
 import { RecruiteeProvider } from './recruitee';
+import { CoresignalProvider } from './coresignal';
 
 const REGISTRY: Record<string, () => JobProvider> = {
   adzuna: () => new AdzunaProvider(),
@@ -23,6 +24,7 @@ const REGISTRY: Record<string, () => JobProvider> = {
   workable: () => new WorkableProvider(),
   smartrecruiters: () => new SmartRecruitersProvider(),
   recruitee: () => new RecruiteeProvider(),
+  coresignal: () => new CoresignalProvider(),
 };
 
 let _providers: JobProvider[] | undefined;

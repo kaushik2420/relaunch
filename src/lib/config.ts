@@ -42,6 +42,10 @@ const serverSchema = z.object({
   JOOBLE_API_KEY: z.string().optional(),
   GREENHOUSE_BOARDS: z.string().default(''),
   JSEARCH_API_KEY: z.string().optional(),
+  // Coresignal Multi-source Jobs API. Trial + subscription both use
+  // the same key format (phc_...). Off by default in JOB_PROVIDERS
+  // until you decide to subscribe — see docs/SETUP_CORESIGNAL.md.
+  CORESIGNAL_API_KEY: z.string().optional(),
   LEVER_BOARDS: z.string().default(''),
   WORKABLE_BOARDS: z.string().default(''),
   SMARTRECRUITERS_BOARDS: z.string().default(''),
