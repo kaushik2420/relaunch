@@ -15,6 +15,7 @@ import {
 import { classifyAtsUrl } from '@/lib/ats-url';
 import { fetchWatchedCompanyJobs } from './watched-fetch';
 import { monitorManualWatched } from './manual-careers-monitor';
+import { applyTitleGuard } from './title-guard';
 import type { TailoredJobMatch, UserProfile, UserPreferences, PivotBrief, TailoredResume, CoverLetter, JobPosting } from '@/lib/types';
 
 /**
@@ -88,7 +89,21 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   // Merge — let the embedding ranker decide which watched-company
   // roles are actually a fit. Dedupe in fetchJobsFromAll is by
   // (company, title); we rely on the rest of the pipeline for it.
-  const jobs = [...jobsFromProviders, ...jobsFromWatched];
+  const rawJobs = [...jobsFromProviders, ...jobsFromWatched];
+
+  // 1b. Title guardrail — strip obvious wrong-role postings the fuzzy
+  // providers dragged in (e.g. "Product Marketing Manager" for a PM
+  // search). See src/lib/services/title-guard.ts for the family-by-
+  // family rules. No-op for families without configured rules.
+  const { kept: jobs, dropped: guardDropped } = applyTitleGuard(
+    rawJobs,
+    userRow.role_family ?? null,
+  );
+  if (guardDropped.length > 0) {
+    console.log(
+      `[daily-runner] title-guard(${userRow.role_family}): dropped ${guardDropped.length}/${rawJobs.length} — samples: ${guardDropped.slice(0, 5).map((j) => `"${j.title}"`).join(', ')}`,
+    );
+  }
 
   // 2. Rank + filter; take the top N (configurable)
   const ranked = await rankJobs(jobs, profile, prefs);
@@ -321,13 +336,15 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
 
   // 4d. The "long tail" — jobs that the embedding ranker liked but that
   // we didn't have budget to LLM-verify (ranks 26..50 of the full
-  // ranked list). Filtered to >=35% match so the bottom of the pool
-  // doesn't surface obvious garbage. verify_score stays null so the
-  // dashboard can chip these as "Discovered" rather than "Verified".
+  // ranked list). Filtered to >=45% match so the bottom of the pool
+  // doesn't surface obvious garbage. Was 35 — bumped after PM users
+  // reported wrong-role postings ("Product Marketing Manager" etc.)
+  // leaking through. verify_score stays null so the dashboard chips
+  // these as "Discovered" rather than "Verified".
   try {
     const longTail = ranked
       .slice(25, 50)
-      .filter((r) => r.matchPercent >= 35);
+      .filter((r) => r.matchPercent >= 45);
     await persistMatchSummaries(
       userRow.id,
       longTail.map((r) => ({

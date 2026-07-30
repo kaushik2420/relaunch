@@ -355,7 +355,7 @@ Rules:
         ? `Target role family: ${familyLabel}`
         : `Current/last role from résumé: ${profile.experience?.[0]?.title ?? '(unknown)'}`;
 
-    const prompt = `You are a strict filter for a job-search tool. Score how well a job posting actually matches what a candidate is looking for. Be HARSH on near-misses: e.g. a "Senior Backend Engineer" posting should score VERY LOW for a candidate targeting "Customer Success Manager", regardless of how prestigious the company is.
+    const prompt = `You are a strict filter for a job-search tool. Score how well a job posting actually matches what a candidate is looking for. Be HARSH on near-misses: fuzzy job APIs return lots of same-tokens-different-role postings and it's your job to catch them.
 
 CANDIDATE:
 ${targetLine}
@@ -369,11 +369,19 @@ Location: ${job.location}
 Description (first 1200 chars):
 ${(job.description ?? '').slice(0, 1200)}
 
+Common wrong-role traps to catch (score these 0-19):
+- Target "Product Manager" ≠ "Product Marketing Manager" / "Project Manager" / "Program Manager" / "Product Designer" / "Product Analyst" / "Portfolio Manager"
+- Target "Software Engineer" ≠ "Sales Engineer" / "Support Engineer" / "Field Engineer" / "Solutions Engineer" (unless target is that specifically)
+- Target "Data Scientist" ≠ "Data Analyst" / "Data Engineer" / "Data Entry"
+- Target "Designer" ≠ "Design Manager" / "Interior Designer" / "Fashion Designer"
+- Target "Customer Success" ≠ "Customer Support" / "Customer Service"
+- Any target ≠ a role at a completely different seniority (an IC targeting a Director role, or vice-versa)
+
 Scoring rubric:
 - 80–100: clearly the right kind of role and roughly the right level.
 - 50–79: adjacent or partial match (right domain, wrong level, OR right level, wrong specialism).
 - 20–49: wrong kind of role — applying would mostly waste the candidate's time.
-- 0–19: completely off-topic.
+- 0–19: completely off-topic OR one of the wrong-role traps above.
 
 Output STRICT JSON: { "score": <integer 0–100>, "reason": "<one short sentence>" }`;
 
