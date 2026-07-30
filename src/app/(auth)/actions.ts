@@ -151,8 +151,12 @@ export async function sendResetAction(formData: FormData) {
     .trim()
     .toLowerCase();
   const sb = createSupabaseServer();
+  // Route through the callback so the PKCE `code` is exchanged for a
+  // recovery session BEFORE we render the "set new password" form.
+  // Pointing straight to /reset skips the exchange and updateUser()
+  // then 404s because there's no authenticated session.
   await sb.auth.resetPasswordForEmail(email, {
-    redirectTo: `${publicConfig.NEXT_PUBLIC_APP_URL}/reset`,
+    redirectTo: `${publicConfig.NEXT_PUBLIC_APP_URL}/api/auth/callback?next=/reset`,
   });
   // Always redirect to "sent" even if email doesn't exist (privacy).
   redirect("/forgot?sent=1");
@@ -165,6 +169,21 @@ export async function setNewPasswordAction(formData: FormData) {
     redirect("/reset?error=" + encodeURIComponent("Passwords don't match"));
   }
   const sb = createSupabaseServer();
+  // Defensive check: if the recovery session wasn't established (link
+  // expired, redirect_uri mismatch in Supabase project settings, or the
+  // user opened /reset directly), give a clear message instead of the
+  // opaque "Auth session missing" error.
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) {
+    redirect(
+      "/forgot?error=" +
+        encodeURIComponent(
+          "Your reset link expired or was already used. Request a new one.",
+        ),
+    );
+  }
   const { error } = await sb.auth.updateUser({ password });
   if (error) redirect(`/reset?error=${encodeURIComponent(error.message)}`);
   redirect("/dashboard");
