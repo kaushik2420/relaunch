@@ -4,7 +4,7 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { serverConfig } from "@/lib/config";
 import { Logo } from "@/components/Logo";
-import { approveAndInviteAction } from "./actions";
+import { approveAndInviteAction, runDailyDigestForAllAction } from "./actions";
 import {
   estimateMonthlyCost,
   type CostEstimate,
@@ -35,7 +35,7 @@ type FeedbackRow = {
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: { error?: string; invited?: string };
+  searchParams: { error?: string; invited?: string; backfill?: string };
 }) {
   const sb = createSupabaseServer();
   const {
@@ -163,6 +163,50 @@ export default async function AdminPage({
         </div>
 
         <CostPanel cost={cost} usage={usage} />
+
+        {/* ---- Ops: manual triggers (recovery panel) ---- */}
+        <div className="mt-8 rounded-xl border border-line bg-surface p-5">
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold">Send today's digest to all users</h2>
+              <p className="mt-1 text-sm text-ink-soft">
+                Runs the full pipeline for every eligible user right now, ignoring
+                each user's email_time window. Idempotent by default — users who
+                already got today's digest are skipped. Use after an incident
+                (e.g. Anthropic credits expired) to backfill missed sends.
+              </p>
+            </div>
+          </div>
+
+          {searchParams.backfill && (
+            <BackfillBanner encoded={searchParams.backfill} />
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <form action={runDailyDigestForAllAction}>
+              <SubmitButton
+                className="btn-primary"
+                pendingLabel="Running… (may take 2-3 min)"
+              >
+                Backfill missed users
+              </SubmitButton>
+            </form>
+            <form action={runDailyDigestForAllAction}>
+              <input type="hidden" name="force" value="1" />
+              <SubmitButton
+                className="btn-soft"
+                pendingLabel="Running… (may take 2-3 min)"
+              >
+                Force re-run everyone
+              </SubmitButton>
+            </form>
+            <span className="text-xs text-ink-mute">
+              Long-running: if the browser times out the runs continue in the
+              background. Refresh this page to see final counts in the cost
+              panel above.
+            </span>
+          </div>
+        </div>
 
         {/* ---- Users & activity ---- */}
         <div className="mt-12 flex items-baseline gap-3">
@@ -505,6 +549,35 @@ function CostLine({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between border-b border-line py-1.5">
       <span className="text-ink-soft">{label}</span>
       <span className="font-semibold text-ink">{value}</span>
+    </div>
+  );
+}
+
+/** Renders the "N attempted, N succeeded, N failed, N skipped" summary
+ *  after a backfill run. Encoded as a compact comma-string in the URL
+ *  so we don't need to round-trip through JSON. */
+function BackfillBanner({ encoded }: { encoded: string }) {
+  const parts = decodeURIComponent(encoded).split(",").map((n) => Number(n));
+  const [attempted = 0, succeeded = 0, failed = 0, skipped = 0, seconds = 0] = parts;
+  const allOk = failed === 0 && attempted > 0;
+  const tone = allOk
+    ? "border-success/30 bg-success-soft text-ink"
+    : failed > 0
+      ? "border-warn/30 bg-warn-soft text-ink"
+      : "border-line bg-surface-page text-ink-soft";
+  return (
+    <div className={`mt-4 rounded-lg border ${tone} p-3 text-sm`}>
+      <div className="font-semibold">
+        {allOk
+          ? `✅ Backfill complete — ${succeeded} digest${succeeded === 1 ? "" : "s"} sent in ${seconds}s.`
+          : failed > 0
+            ? `⚠️ Backfill finished with issues — ${succeeded}/${attempted} succeeded, ${failed} failed in ${seconds}s.`
+            : `ℹ️ Nothing to do — every eligible user had already received today's digest.`}
+      </div>
+      <div className="mt-1 text-xs text-ink-mute">
+        Attempted {attempted}, succeeded {succeeded}, failed {failed}, skipped {skipped}.
+        {failed > 0 && " Check Vercel logs for per-user error details."}
+      </div>
     </div>
   );
 }

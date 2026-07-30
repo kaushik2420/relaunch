@@ -6,6 +6,7 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { email } from "@/lib/providers/email";
+import { runDailyForAllUsers } from "@/lib/services/backfill-runner";
 
 /** Redirect away anyone who isn't the configured admin. */
 async function requireAdmin() {
@@ -107,4 +108,46 @@ export async function approveAndInviteAction(formData: FormData) {
 
   revalidatePath("/admin");
   redirect("/admin?invited=" + encodeURIComponent(wl.email));
+}
+
+/**
+ * Recovery button: run today's digest for every eligible user right now.
+ *
+ * Default is "missed only" — skip users who already got a successful
+ * digest today (idempotent, safe to hit multiple times). Pass a truthy
+ * `force` field to re-run for everyone.
+ *
+ * Long-running: on Vercel Pro the maxDuration on the action route is 60s.
+ * The underlying pipeline runs users 5-at-a-time; ~40 users takes ~2-3
+ * minutes wall clock, which exceeds the default. The runDailyForAllUsers
+ * result is written to job_runs regardless, so if the browser times out
+ * the runs continue in the background and complete. Refresh /admin to
+ * see the outcome.
+ */
+export async function runDailyDigestForAllAction(formData: FormData) {
+  await requireAdmin();
+  const force = formData.get("force") === "1";
+  try {
+    const s = await runDailyForAllUsers({ force });
+    // Encode a compact summary in the URL so the page can render a
+    // green banner explaining what happened.
+    const compact = [
+      s.attempted,
+      s.succeeded,
+      s.failed,
+      s.skipped,
+      Math.round(s.elapsedMs / 1000),
+    ].join(",");
+    revalidatePath("/admin");
+    redirect(`/admin?backfill=${encodeURIComponent(compact)}`);
+  } catch (err) {
+    // NEXT_REDIRECT is thrown internally by redirect() — must be re-thrown.
+    if ((err as Error).message?.startsWith("NEXT_REDIRECT")) throw err;
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent(
+          `Backfill failed: ${(err as Error).message}`,
+        ),
+    );
+  }
 }
