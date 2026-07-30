@@ -4,7 +4,11 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { serverConfig } from "@/lib/config";
 import { Logo } from "@/components/Logo";
-import { approveAndInviteAction, runDailyDigestForAllAction } from "./actions";
+import {
+  approveAndInviteAction,
+  runDailyDigestForAllAction,
+  runSentinelNowAction,
+} from "./actions";
 import {
   estimateMonthlyCost,
   type CostEstimate,
@@ -35,7 +39,12 @@ type FeedbackRow = {
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: { error?: string; invited?: string; backfill?: string };
+  searchParams: {
+    error?: string;
+    invited?: string;
+    backfill?: string;
+    sentinel?: string;
+  };
 }) {
   const sb = createSupabaseServer();
   const {
@@ -144,6 +153,37 @@ export default async function AdminPage({
     sessionCount: activityByUser.get(u.id)?.sessions ?? 0,
   }));
 
+  // ---- Sentinel: open alerts (unresolved) + last 5 runs ----
+  const { data: openAlerts } = await supabaseAdmin()
+    .from("sentinel_alerts")
+    .select("id, headline, severity, root_cause, suggested_fix, first_detected, last_seen_at, occurrence_count")
+    .is("resolved_at", null)
+    .order("severity", { ascending: false })
+    .order("last_seen_at", { ascending: false })
+    .limit(5);
+  const { data: recentRuns } = await supabaseAdmin()
+    .from("sentinel_runs")
+    .select("id, ran_at, severity, headline, notified")
+    .order("ran_at", { ascending: false })
+    .limit(5);
+  const sentinelAlerts = (openAlerts ?? []) as Array<{
+    id: string;
+    headline: string;
+    severity: number;
+    root_cause: string | null;
+    suggested_fix: string | null;
+    first_detected: string;
+    last_seen_at: string;
+    occurrence_count: number;
+  }>;
+  const sentinelRuns = (recentRuns ?? []) as Array<{
+    id: string;
+    ran_at: string;
+    severity: number;
+    headline: string;
+    notified: boolean;
+  }>;
+
   return (
     <main className="min-h-screen bg-surface-page">
       <nav className="flex items-center justify-between border-b border-line bg-surface px-6 py-3.5">
@@ -161,6 +201,12 @@ export default async function AdminPage({
             Distribution leads →
           </Link>
         </div>
+
+        <SentinelPanel
+          alerts={sentinelAlerts}
+          recentRuns={sentinelRuns}
+          justRan={searchParams.sentinel}
+        />
 
         <CostPanel cost={cost} usage={usage} />
 
@@ -549,6 +595,140 @@ function CostLine({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between border-b border-line py-1.5">
       <span className="text-ink-soft">{label}</span>
       <span className="font-semibold text-ink">{value}</span>
+    </div>
+  );
+}
+
+/** Sentinel panel — open-alerts list + last runs + "run now" button.
+ *  Sits at the very top of /admin so problems are the first thing you
+ *  see when you log in. */
+function SentinelPanel({
+  alerts,
+  recentRuns,
+  justRan,
+}: {
+  alerts: Array<{
+    id: string;
+    headline: string;
+    severity: number;
+    root_cause: string | null;
+    suggested_fix: string | null;
+    first_detected: string;
+    last_seen_at: string;
+    occurrence_count: number;
+  }>;
+  recentRuns: Array<{
+    id: string;
+    ran_at: string;
+    severity: number;
+    headline: string;
+    notified: boolean;
+  }>;
+  justRan?: string;
+}) {
+  const hasAlerts = alerts.length > 0;
+  const lastRun = recentRuns[0] ?? null;
+  const [justRanSev, justRanNotified] = (justRan ?? '').split(',');
+  return (
+    <div
+      className={`mt-6 rounded-xl border p-5 ${
+        hasAlerts
+          ? "border-danger/30 bg-danger-soft"
+          : "border-line bg-surface"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">
+            {hasAlerts ? "🚨 " : ""}Sentinel
+            <span className="ml-2 text-xs font-normal text-ink-soft">
+              hourly self-diagnosis
+            </span>
+          </h2>
+          {lastRun ? (
+            <p className="mt-1 text-xs text-ink-mute">
+              Last ran {fmtRelative(lastRun.ran_at)} · severity {lastRun.severity}
+              {lastRun.notified ? " · notified" : ""}
+              {" · "}
+              <span className="text-ink-soft">{lastRun.headline}</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-ink-mute">
+              No runs yet. Hourly cron fires at :05 past every hour after next deploy.
+            </p>
+          )}
+        </div>
+        <form action={runSentinelNowAction}>
+          <SubmitButton className="btn-soft" pendingLabel="Triaging…">
+            Run sentinel now
+          </SubmitButton>
+        </form>
+      </div>
+
+      {justRan && (
+        <p className="mt-3 rounded-lg border border-line bg-surface p-2 text-xs">
+          {justRanSev === "0"
+            ? `✅ Triage complete — all clear.`
+            : `Triage complete — severity ${justRanSev}${justRanNotified === "1" ? ", admin notified" : ""}. Details below.`}
+        </p>
+      )}
+
+      {hasAlerts && (
+        <div className="mt-4 space-y-3">
+          {alerts.map((a) => (
+            <div
+              key={a.id}
+              className="rounded-lg border border-danger/30 bg-surface p-4"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-danger/15 px-2 py-0.5 text-xs font-semibold text-danger">
+                    sev {a.severity}
+                  </span>
+                  <span className="font-semibold">{a.headline}</span>
+                </div>
+                <span className="text-xs text-ink-mute">
+                  {a.occurrence_count}× · first {fmtRelative(a.first_detected)}
+                </span>
+              </div>
+              {a.root_cause && (
+                <div className="mt-2 text-sm text-ink">
+                  <span className="text-xs font-semibold text-ink-soft">
+                    Root cause:
+                  </span>{" "}
+                  {a.root_cause}
+                </div>
+              )}
+              {a.suggested_fix && (
+                <div className="mt-2 rounded-md bg-brand-50 p-2 text-sm text-brand-700">
+                  <span className="font-semibold">Fix:</span> {a.suggested_fix}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!hasAlerts && recentRuns.length > 0 && (
+        <details className="mt-3 text-xs text-ink-soft">
+          <summary className="cursor-pointer">
+            Last {recentRuns.length} sentinel runs (all clear)
+          </summary>
+          <table className="mt-2 w-full">
+            <tbody>
+              {recentRuns.map((r) => (
+                <tr key={r.id} className="border-t border-line">
+                  <td className="py-1 pr-2 text-ink-mute">
+                    {fmtDateTime(r.ran_at)}
+                  </td>
+                  <td className="py-1 pr-2">sev {r.severity}</td>
+                  <td className="py-1">{r.headline}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
     </div>
   );
 }

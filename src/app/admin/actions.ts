@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { email } from "@/lib/providers/email";
 import { runDailyForAllUsers } from "@/lib/services/backfill-runner";
+import { runSentinel } from "@/lib/services/sentinel";
 
 /** Redirect away anyone who isn't the configured admin. */
 async function requireAdmin() {
@@ -124,6 +125,30 @@ export async function approveAndInviteAction(formData: FormData) {
  * the runs continue in the background and complete. Refresh /admin to
  * see the outcome.
  */
+/**
+ * On-demand sentinel triage — same code the hourly cron runs. Useful
+ * for confirming the sentinel is alive after a code change, or after
+ * you've applied a fix to see if the alert clears.
+ */
+export async function runSentinelNowAction() {
+  await requireAdmin();
+  try {
+    const result = await runSentinel();
+    revalidatePath("/admin");
+    const flag = [
+      result.diagnosis.severity,
+      result.notified ? '1' : '0',
+    ].join(',');
+    redirect(`/admin?sentinel=${encodeURIComponent(flag)}`);
+  } catch (err) {
+    if ((err as Error).message?.startsWith("NEXT_REDIRECT")) throw err;
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent(`Sentinel failed: ${(err as Error).message}`),
+    );
+  }
+}
+
 export async function runDailyDigestForAllAction(formData: FormData) {
   await requireAdmin();
   const force = formData.get("force") === "1";
