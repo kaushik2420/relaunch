@@ -335,13 +335,24 @@ export interface OpenAIWebSearchResult {
     parsedJobsCount: number | null;
     parsedSummary: unknown;
     firstMapFailure: string | null;
+    outputShape: string;
+    responseStatus: string | null;
+    incompleteDetails: unknown;
   };
 }
 
 interface OpenAIResponsesEnvelope {
   id?: string;
+  status?: string;
+  incomplete_details?: unknown;
   output?: Array<{
     type: string;
+    id?: string;
+    role?: string;
+    content?: Array<{
+      type: string;
+      text?: string;
+    }>;
     action?: {
       sources?: Array<{ url?: string; title?: string; type?: string }>;
     };
@@ -466,13 +477,19 @@ function parseAndMap(
   raw: OpenAIResponsesEnvelope,
   q: JobSearchQuery,
 ): JobPosting[] {
-  if (!raw.output_text) {
-    console.warn('[openai-web] no output_text in response');
+  // Convenience field: some responses populate `output_text` at the
+  // envelope level. Others don't — the JSON lives inside
+  // output[N].content[M].text where item.type === 'message'. Try both.
+  const text = extractOutputText(raw);
+  if (!text) {
+    console.warn(
+      `[openai-web] no output_text found — output shape: ${describeOutputShape(raw)}`,
+    );
     return [];
   }
   let parsed: RawEnvelope;
   try {
-    parsed = JSON.parse(raw.output_text) as RawEnvelope;
+    parsed = JSON.parse(text) as RawEnvelope;
   } catch (err) {
     console.error('[openai-web] failed to parse output_text', err);
     return [];
@@ -486,6 +503,46 @@ function parseAndMap(
     `[openai-web] "${q.query}" @ ${q.locations.join('/')} → ${jobs.length} jobs (${parsed.search_summary?.expanded_job_titles?.length ?? 0} titles expanded)`,
   );
   return jobs;
+}
+
+/**
+ * Pull the model's structured JSON out of a Responses API envelope.
+ * Prefers the top-level output_text convenience field; falls back to
+ * scanning the output array for a message-type item with an
+ * output_text content block. Returns null when nothing is present.
+ */
+function extractOutputText(raw: OpenAIResponsesEnvelope): string | null {
+  if (raw.output_text && raw.output_text.trim()) return raw.output_text;
+  for (const item of raw.output ?? []) {
+    if (item.type !== 'message') continue;
+    for (const c of item.content ?? []) {
+      if (
+        (c.type === 'output_text' || c.type === 'text') &&
+        typeof c.text === 'string' &&
+        c.text.trim()
+      ) {
+        return c.text;
+      }
+    }
+  }
+  return null;
+}
+
+/** Compact human-readable description of the output array shape. Used
+ *  in logs and diagnostic when output_text isn't present, so we can
+ *  see what item types the model actually emitted. */
+function describeOutputShape(raw: OpenAIResponsesEnvelope): string {
+  const items = raw.output ?? [];
+  if (items.length === 0) return 'empty output array';
+  return items
+    .map((it) => {
+      if (it.type === 'message') {
+        const kinds = (it.content ?? []).map((c) => c.type).join(',');
+        return `message[${kinds || 'no-content'}]`;
+      }
+      return it.type;
+    })
+    .join(' → ');
 }
 
 function mapJob(r: RawJob): JobPosting | null {
@@ -559,13 +616,19 @@ function extractSources(raw: OpenAIResponsesEnvelope): OpenAIWebSearchSource[] {
 function collectParseDebug(
   raw: OpenAIResponsesEnvelope,
 ): NonNullable<OpenAIWebSearchResult['debug']> {
-  const outputTextRaw = raw.output_text ?? null;
+  const outputShape = describeOutputShape(raw);
+  const responseStatus = raw.status ?? null;
+  const incompleteDetails = raw.incomplete_details ?? null;
+  const outputTextRaw = extractOutputText(raw);
   if (!outputTextRaw) {
     return {
       outputTextRaw: null,
       parsedJobsCount: null,
       parsedSummary: null,
-      firstMapFailure: 'output_text was null/undefined in response',
+      firstMapFailure: 'no output_text found in envelope or output[].message.content',
+      outputShape,
+      responseStatus,
+      incompleteDetails,
     };
   }
   try {
@@ -586,6 +649,9 @@ function collectParseDebug(
       parsedJobsCount: rawJobs.length,
       parsedSummary: parsed.search_summary ?? null,
       firstMapFailure,
+      outputShape,
+      responseStatus,
+      incompleteDetails,
     };
   } catch (err) {
     return {
@@ -593,6 +659,9 @@ function collectParseDebug(
       parsedJobsCount: null,
       parsedSummary: null,
       firstMapFailure: `JSON.parse failed: ${(err as Error).message}`,
+      outputShape,
+      responseStatus,
+      incompleteDetails,
     };
   }
 }
