@@ -134,6 +134,10 @@ export async function GET(req: NextRequest) {
         url: j.url,
         why_match: (j.matchReasons ?? []).slice(0, 2),
       })),
+      // Populated only when jobs.length === 0. Shows the raw
+      // output_text OpenAI returned, and — if it parsed — how many
+      // jobs came out and why they got dropped in mapping.
+      debug: live.debug ?? null,
     },
     rawProbe: raw,
     recentCalls,
@@ -233,6 +237,21 @@ function diagnose(
   }
   if (live.error) {
     return `Structured call errored: ${live.error}. Raw probe was HTTP ${raw.status} (${raw.ok ? 'ok' : 'not ok'}), so the endpoint is reachable — likely a schema or query issue.`;
+  }
+  if (live.jobs.length === 0 && live.debug) {
+    if (live.debug.outputTextRaw === null) {
+      return `Live call succeeded (${live.openaiResponseId}) but output_text was empty. The response likely finished via web_search calls without producing a text output — model may be timing out mid-search or the schema is being rejected silently. Check liveCall.debug for the response shape.`;
+    }
+    if (live.debug.parsedJobsCount === null) {
+      return `output_text was present but JSON.parse failed: ${live.debug.firstMapFailure}. The model didn't honor the strict schema. Try shortening the system prompt or lowering search_context_size.`;
+    }
+    if (live.debug.parsedJobsCount === 0) {
+      return `Model returned {jobs: []} — it searched (${live.sources.length} sources) but nothing met minimum_fit_score=65. Lower the threshold in openai-web-search.ts buildCriteria() to 45, or try a more common role query.`;
+    }
+    if (live.debug.firstMapFailure) {
+      return `Model returned ${live.debug.parsedJobsCount} jobs but ALL were dropped in mapping. First failure: ${live.debug.firstMapFailure}. Likely missing title/company/url in the response. Inspect liveCall.debug.outputTextRaw to see the actual returned shape.`;
+    }
+    return `Model returned ${live.debug.parsedJobsCount} jobs but none survived mapping. Unusual — inspect liveCall.debug.outputTextRaw.`;
   }
   if (live.jobs.length === 0 && raw.jobsInOutput && raw.jobsInOutput > 0) {
     return `Structured schema returned 0 jobs even though the raw probe surfaced ${raw.jobsInOutput} URLs. Likely the minimum_fit_score=65 filter is too strict for this query, OR the model isn't filling the strict JSON schema properly. Try a broader query, or lower minimum_fit_score.`;

@@ -288,11 +288,18 @@ export class OpenAIWebSearchProvider implements JobProvider {
       const raw = (await res.json()) as OpenAIResponsesEnvelope;
       const jobs = parseAndMap(raw, q);
       const sources = extractSources(raw);
-      return {
+      const result: OpenAIWebSearchResult = {
         jobs,
         sources,
         openaiResponseId: raw.id ?? null,
       };
+      // When parsing yielded nothing, attach a debug block so
+      // /api/admin/openai-diagnostic can show exactly what the model
+      // returned. Kept trimmed to avoid blowing up response size.
+      if (jobs.length === 0) {
+        result.debug = collectParseDebug(raw);
+      }
+      return result;
     } catch (err) {
       const isAbort = (err as Error).name === 'AbortError';
       return {
@@ -321,6 +328,14 @@ export interface OpenAIWebSearchResult {
   openaiResponseId: string | null;
   error?: string;
   skipped?: 'disabled' | 'no-key' | 'over-cap' | 'cached';
+  /** Set when jobs.length === 0 so the diagnostic can see WHY parse
+   *  yielded nothing. Not persisted, not returned to normal callers. */
+  debug?: {
+    outputTextRaw: string | null;
+    parsedJobsCount: number | null;
+    parsedSummary: unknown;
+    firstMapFailure: string | null;
+  };
 }
 
 interface OpenAIResponsesEnvelope {
@@ -534,6 +549,52 @@ function extractSources(raw: OpenAIResponsesEnvelope): OpenAIWebSearchSource[] {
     }
   }
   return out;
+}
+
+/**
+ * When jobs.length === 0 the diagnostic wants to know WHY. Attempt to
+ * parse output_text, count raw jobs, note the first mapping failure,
+ * and return small trimmed snippets so the response body stays small.
+ */
+function collectParseDebug(
+  raw: OpenAIResponsesEnvelope,
+): NonNullable<OpenAIWebSearchResult['debug']> {
+  const outputTextRaw = raw.output_text ?? null;
+  if (!outputTextRaw) {
+    return {
+      outputTextRaw: null,
+      parsedJobsCount: null,
+      parsedSummary: null,
+      firstMapFailure: 'output_text was null/undefined in response',
+    };
+  }
+  try {
+    const parsed = JSON.parse(outputTextRaw) as RawEnvelope;
+    const rawJobs = parsed.jobs ?? [];
+    let firstMapFailure: string | null = null;
+    for (const rj of rawJobs) {
+      const title = (rj.job_title ?? '').trim();
+      const company = (rj.company ?? '').trim();
+      const url = normalizeUrl(rj.application_url);
+      if (!title || !company || !url) {
+        firstMapFailure = `title="${title}" company="${company}" url="${url}"`;
+        break;
+      }
+    }
+    return {
+      outputTextRaw: outputTextRaw.slice(0, 2000),
+      parsedJobsCount: rawJobs.length,
+      parsedSummary: parsed.search_summary ?? null,
+      firstMapFailure,
+    };
+  } catch (err) {
+    return {
+      outputTextRaw: outputTextRaw.slice(0, 2000),
+      parsedJobsCount: null,
+      parsedSummary: null,
+      firstMapFailure: `JSON.parse failed: ${(err as Error).message}`,
+    };
+  }
 }
 
 function normalizeUrl(v?: string): string {
