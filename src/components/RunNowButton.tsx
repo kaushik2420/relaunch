@@ -135,11 +135,13 @@ function OpenAIStatusRow({ status }: { status: OpenAIRunStatus | null }) {
   let text: string;
   let tone: 'success' | 'warn' | 'danger' | 'muted';
   let title: string | undefined;
+  let inlineErrorDetail: string | null = null;
 
   if (status.error) {
     tone = 'danger';
     text = '✕ error';
     title = status.error;
+    inlineErrorDetail = status.error;
   } else if (status.skipped === 'disabled') {
     tone = 'muted';
     text = 'disabled';
@@ -176,11 +178,20 @@ function OpenAIStatusRow({ status }: { status: OpenAIRunStatus | null }) {
           : 'text-ink-mute';
 
   return (
-    <div className="flex justify-between gap-2 border-t border-line pt-1 mt-1">
-      <span className="text-ink-soft">{label}</span>
-      <span className={toneClass} title={title}>
-        {text}
-      </span>
-    </div>
+    <>
+      <div className="flex justify-between gap-2 border-t border-line pt-1 mt-1">
+        <span className="text-ink-soft">{label}</span>
+        <span className={toneClass} title={title}>
+          {text}
+        </span>
+      </div>
+      {inlineErrorDetail && (
+        <div className="mt-1 rounded bg-danger-soft/50 p-1.5 text-[10px] text-danger break-words">
+          {inlineErrorDetail.length > 260
+            ? inlineErrorDetail.slice(0, 260) + '…'
+            : inlineErrorDetail}
+        </div>
+      )}
+    </>
   );
 }
