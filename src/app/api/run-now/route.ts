@@ -305,9 +305,20 @@ async function runOpenAIWebSearch(
 }
 
 /**
+ * Bump this when we change the OpenAI request shape in a way that
+ * would meaningfully alter results (new prompt, new schema fields,
+ * loosened thresholds, added profile context). Every cache row is
+ * keyed on the version, so a bump silently invalidates the old cache
+ * without needing a DB migration or a manual delete.
+ *
+ * v2 (2026-08-01): passing profile context + lowered min_fit_score
+ * 65 -> 50 + max_results 10 -> 20. v1 results were too narrow.
+ */
+const CACHE_KEY_VERSION = 'v2';
+
+/**
  * Sha1-fingerprint of the criteria that meaningfully affect results.
- * Two calls with the same fingerprint should be able to reuse the same
- * response body — same profile, same query, same location set.
+ * Two calls with the same fingerprint reuse the same response body.
  */
 function hashCriteria(q: {
   query: string;
@@ -317,6 +328,7 @@ function hashCriteria(q: {
   postedWithinDays: number;
 }): string {
   const canonical = JSON.stringify({
+    v: CACHE_KEY_VERSION,
     query: q.query.toLowerCase().trim(),
     locations: [...q.locations].sort(),
     workMode: q.workMode,
