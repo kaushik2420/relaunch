@@ -58,7 +58,7 @@ const serverSchema = z.object({
     .optional()
     .transform((v) => {
       const n = v && v.trim() ? Number(v) : NaN;
-      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 10;
     }),
 
   // Jobs
