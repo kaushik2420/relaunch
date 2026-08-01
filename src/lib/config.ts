@@ -35,7 +35,13 @@ const serverSchema = z.object({
   // OpenAI Web Search — Responses API with hosted web_search tool.
   // Fires on user-triggered "Find matches now" only, not the nightly
   // cron. See docs/SETUP_OPENAI_WEBSEARCH.md.
-  OPENAI_MODEL_JOB_SEARCH: z.string().default('gpt-5.6-terra'),
+  //
+  // Tolerant of empty strings from Vercel (an unset-but-listed env var
+  // arrives as ""). Plain .default() only applies to strictly undefined.
+  OPENAI_MODEL_JOB_SEARCH: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? v.trim() : 'gpt-5.6-terra')),
   // Tolerant of empty strings from Vercel (an unset-but-listed env var
   // arrives as ""). Plain zod defaults only apply when the value is
   // strictly undefined, which broke prod deploys after users added the
