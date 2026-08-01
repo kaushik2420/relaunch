@@ -10,6 +10,7 @@ import {
 } from "@/lib/providers/jobs/openai-web-search";
 import type { JobPosting, UserProfile } from "@/lib/types";
 import { canonicalLocationLabels } from "@/lib/locations";
+import { findRoleFamily } from "@/lib/role-families";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -263,10 +264,18 @@ async function runOpenAIWebSearch(
     };
   }
 
-  // Fire the actual OpenAI call.
+  // Fire the actual OpenAI call. Pass profile context so the model can
+  // do proper semantic title expansion — otherwise a bare query like
+  // "Solutions" makes the model guess and we get 1 hit out of 47
+  // sources. See src/lib/providers/jobs/openai-web-search.ts buildCriteria().
+  const rf = userRow.role_family ? findRoleFamily(userRow.role_family) : undefined;
   const start = Date.now();
   const provider = new OpenAIWebSearchProvider();
-  const result = await provider.searchWithEnvelope(jobSearchQuery);
+  const result = await provider.searchWithEnvelope(jobSearchQuery, {
+    profile,
+    roleFamilyLabel: rf?.label,
+    careerGoal: profile.headline,
+  });
   const durationMs = Date.now() - start;
 
   // Rough cost estimate — see docs: $10/1K web search calls + tokens.

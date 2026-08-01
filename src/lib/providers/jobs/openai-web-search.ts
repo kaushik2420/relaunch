@@ -1,5 +1,5 @@
 import { serverConfig } from '@/lib/config';
-import type { JobPosting } from '@/lib/types';
+import type { JobPosting, UserProfile } from '@/lib/types';
 import type { JobProvider, JobSearchQuery } from './types';
 
 /**
@@ -239,8 +239,20 @@ export class OpenAIWebSearchProvider implements JobProvider {
    * mapped JobPosting[]. Used by /api/run-now so we can persist the
    * telemetry to openai_websearch_calls. The plain search() above stays
    * JobProvider-shape for future compatibility with fetchJobsFromAll.
+   *
+   * Optional `context` enriches the criteria we send with candidate
+   * profile signals (skills, seniority, experience) so the model can
+   * do proper semantic title expansion instead of guessing from a
+   * bare job-title keyword.
    */
-  async searchWithEnvelope(q: JobSearchQuery): Promise<OpenAIWebSearchResult> {
+  async searchWithEnvelope(
+    q: JobSearchQuery,
+    context?: {
+      profile?: UserProfile;
+      roleFamilyLabel?: string;
+      careerGoal?: string;
+    },
+  ): Promise<OpenAIWebSearchResult> {
     const cfg = serverConfig();
     if (!cfg.OPENAI_WEB_SEARCH_ENABLED) {
       return {
@@ -259,7 +271,7 @@ export class OpenAIWebSearchProvider implements JobProvider {
       };
     }
 
-    const criteria = buildCriteria(q);
+    const criteria = buildCriteria(q, context);
     const userPrompt = buildUserPrompt(criteria);
     const body = buildRequestBody(cfg, userPrompt);
 
@@ -427,23 +439,92 @@ function buildRequestBody(
 
 /**
  * Map JobSearchQuery (our internal shape) onto the criteria object shape
- * the OpenAI system prompt expects. Includes sensible defaults for
- * fields the prompt uses but our JobSearchQuery doesn't carry.
+ * the OpenAI system prompt expects.
+ *
+ * If we have profile context, pass through the candidate's skills,
+ * seniority, and experience — the system prompt explicitly asks the
+ * model to expand titles semantically based on this data. Without it,
+ * the model is forced to guess (e.g. "Solutions" could mean anything).
+ *
+ * Tuned for RECALL over precision: max_results 20 + minimum_fit_score 50
+ * (was 10 + 65). We were losing 90% of relevant matches to the strict
+ * threshold. Downstream ranking + Sonnet tailoring re-filters the pool,
+ * so casting a wider net upstream is safe.
  */
-function buildCriteria(q: JobSearchQuery): OpenAICriteria {
+function buildCriteria(
+  q: JobSearchQuery,
+  context?: {
+    profile?: UserProfile;
+    roleFamilyLabel?: string;
+    careerGoal?: string;
+  },
+): OpenAICriteria {
   const workModes: string[] =
     q.workMode === 'any' || !q.workMode
       ? ['Remote', 'Hybrid', 'On-site']
       : [String(q.workMode)];
-  return {
+
+  const titles = [q.query];
+  if (
+    context?.roleFamilyLabel &&
+    !titles.includes(context.roleFamilyLabel)
+  ) {
+    titles.push(context.roleFamilyLabel);
+  }
+
+  const criteria: OpenAICriteria = {
     locations: q.locations,
-    job_titles: [q.query],
+    job_titles: titles,
     work_modes: workModes,
     posted_within_days: q.postedWithinDays ?? 14,
-    max_results: Math.min(q.limit ?? 10, 20),
-    minimum_fit_score: 65,
+    max_results: Math.min(q.limit ?? 20, 20),
+    minimum_fit_score: 50,
     exclude_keywords: ['Intern', 'Junior'],
   };
+
+  // Profile-derived enrichment — omitted when we don't have it so the
+  // criteria stay minimal (avoids padding cheap keyword calls with
+  // noise). System prompt looks for these exact field names.
+  const p = context?.profile;
+  if (p) {
+    if (p.skills?.length) {
+      criteria.skills = p.skills.slice(0, 12);
+    }
+    if (typeof p.yearsExperience === 'number' && p.yearsExperience > 0) {
+      criteria.experience_years = p.yearsExperience;
+    }
+    if (p.seniority) {
+      // Map our internal seniority enum to the human-readable list the
+      // handoff-doc example uses (Senior Manager, Director, etc.).
+      criteria.seniority = mapSeniority(p.seniority);
+    }
+  }
+  const goal = context?.careerGoal?.trim() || context?.profile?.headline?.trim();
+  if (goal) {
+    criteria.career_goal = goal;
+  }
+
+  return criteria;
+}
+
+/** Map internal seniority enum to a broader set of "acceptable levels"
+ *  the OpenAI-searched postings might use. e.g. someone marked "senior"
+ *  should also see Staff / Principal / Lead roles. */
+function mapSeniority(s: UserProfile['seniority']): string[] {
+  switch (s) {
+    case 'junior':
+      return ['Junior', 'Associate', 'Mid'];
+    case 'mid':
+      return ['Mid', 'Senior', 'Associate'];
+    case 'senior':
+      return ['Senior', 'Staff', 'Lead', 'Manager'];
+    case 'staff':
+      return ['Staff', 'Senior', 'Principal', 'Lead', 'Manager'];
+    case 'principal':
+      return ['Principal', 'Staff', 'Director', 'Head', 'Lead'];
+    default:
+      return ['Senior'];
+  }
 }
 
 interface OpenAICriteria {
@@ -454,6 +535,11 @@ interface OpenAICriteria {
   max_results: number;
   minimum_fit_score: number;
   exclude_keywords: string[];
+  // Optional, populated when the caller passes profile context
+  skills?: string[];
+  experience_years?: number;
+  seniority?: string[];
+  career_goal?: string;
 }
 
 function buildUserPrompt(criteria: OpenAICriteria): string {
