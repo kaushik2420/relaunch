@@ -36,11 +36,24 @@ const serverSchema = z.object({
   // Fires on user-triggered "Find matches now" only, not the nightly
   // cron. See docs/SETUP_OPENAI_WEBSEARCH.md.
   OPENAI_MODEL_JOB_SEARCH: z.string().default('gpt-5.6-terra'),
+  // Tolerant of empty strings from Vercel (an unset-but-listed env var
+  // arrives as ""). Plain zod defaults only apply when the value is
+  // strictly undefined, which broke prod deploys after users added the
+  // key with no value. Both accept unset / empty / any string.
   OPENAI_WEB_SEARCH_ENABLED: z
     .string()
-    .default('true')
-    .transform((v) => v.toLowerCase() !== 'false'),
-  OPENAI_WEB_SEARCH_DAILY_CAP: z.coerce.number().int().positive().default(3),
+    .optional()
+    .transform((v) => {
+      if (!v || !v.trim()) return true; // default: enabled
+      return v.toLowerCase() !== 'false';
+    }),
+  OPENAI_WEB_SEARCH_DAILY_CAP: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const n = v && v.trim() ? Number(v) : NaN;
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
+    }),
 
   // Jobs
   JOB_PROVIDERS: z
