@@ -18,6 +18,17 @@ interface MatchRow {
   cover_letter_text: string | null;
   applied_at: string | null;
   created_at: string;
+  ats: string | null;
+  openai_metadata: OpenAIMatchMetadata | null;
+}
+
+interface OpenAIMatchMetadata {
+  match_level?: string;
+  match_reasons?: string[];
+  potential_gaps?: string[];
+  evidence_urls?: string[];
+  location?: string;
+  work_mode?: string;
 }
 
 /**
@@ -57,7 +68,7 @@ export default async function AllMatchesPage({
   let baseQuery = admin
     .from("job_matches")
     .select(
-      "id, apply_url, job_title, company, match_percent, verify_score, tailored_resume_text, cover_letter_text, applied_at, created_at",
+      "id, apply_url, job_title, company, match_percent, verify_score, tailored_resume_text, cover_letter_text, applied_at, created_at, ats, openai_metadata",
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
@@ -215,6 +226,12 @@ function MatchRowCard({
   const isTailored =
     !!match.tailored_resume_text || !!match.cover_letter_text;
   const pct = match.match_percent ?? 0;
+  const isAiDiscovered = match.ats === 'openai_web';
+  const meta = match.openai_metadata;
+  const hasWhyMatch =
+    isAiDiscovered &&
+    ((meta?.match_reasons?.length ?? 0) > 0 ||
+      (meta?.potential_gaps?.length ?? 0) > 0);
   return (
     <div className="rounded-xl border border-line bg-surface p-4 shadow-card transition-shadow hover:shadow-lg">
       <div className="flex items-start justify-between gap-3">
@@ -225,7 +242,12 @@ function MatchRowCard({
           className="min-w-0 flex-1"
         >
           <div className="font-bold text-ink truncate">{match.job_title}</div>
-          <div className="text-sm text-ink-soft truncate">{match.company}</div>
+          <div className="text-sm text-ink-soft truncate">
+            {match.company}
+            {isAiDiscovered && meta?.location ? (
+              <span className="text-ink-mute"> · {meta.location}</span>
+            ) : null}
+          </div>
         </a>
         <div className="text-right shrink-0">
           <div className="text-lg font-bold text-brand-500">{pct}%</div>
@@ -235,7 +257,17 @@ function MatchRowCard({
         </div>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        {isTailored ? (
+        {isAiDiscovered ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-brand-500 px-2 py-0.5 font-semibold text-white"
+            title="Discovered from the live web by OpenAI"
+          >
+            ✨ AI-discovered
+            {meta?.match_level ? (
+              <span className="opacity-80"> · {meta.match_level}</span>
+            ) : null}
+          </span>
+        ) : isTailored ? (
           <span className="inline-flex items-center rounded-full bg-success-soft px-2 py-0.5 font-semibold text-success">
             ✓ Tailored
           </span>
@@ -252,7 +284,7 @@ function MatchRowCard({
         <SalaryCheck
           jobTitle={match.job_title}
           company={match.company}
-          location=""
+          location={meta?.location ?? ""}
         />
         <a
           href={match.apply_url}
@@ -263,6 +295,54 @@ function MatchRowCard({
           View role →
         </a>
       </div>
+
+      {hasWhyMatch && (
+        <details className="mt-3 rounded-lg border border-brand-50 bg-brand-50/40 p-3 text-sm">
+          <summary className="cursor-pointer font-semibold text-brand-700">
+            Why this matches you
+          </summary>
+          {meta?.match_reasons && meta.match_reasons.length > 0 && (
+            <ul className="mt-2 list-disc pl-5 text-ink">
+              {meta.match_reasons.slice(0, 4).map((r, i) => (
+                <li key={i} className="my-0.5">{r}</li>
+              ))}
+            </ul>
+          )}
+          {meta?.potential_gaps && meta.potential_gaps.length > 0 && (
+            <>
+              <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                Potential gaps
+              </div>
+              <ul className="mt-1 list-disc pl-5 text-ink-soft">
+                {meta.potential_gaps.slice(0, 3).map((g, i) => (
+                  <li key={i} className="my-0.5">{g}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {meta?.evidence_urls && meta.evidence_urls.length > 0 && (
+            <>
+              <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                Sources
+              </div>
+              <ul className="mt-1 space-y-1 text-xs">
+                {meta.evidence_urls.slice(0, 3).map((u, i) => (
+                  <li key={i}>
+                    <a
+                      href={u}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand-700 hover:underline break-all"
+                    >
+                      {safeHostname(u)} ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </details>
+      )}
     </div>
   );
 }
@@ -282,6 +362,15 @@ function preserveOtherParams({
   if (watchlistOnly) params.set("from", "watchlist");
   const qs = params.toString();
   return qs ? `/all-matches?${qs}` : "/all-matches";
+}
+
+/** URL hostname without throwing on malformed input. */
+function safeHostname(u: string): string {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return u.slice(0, 40);
+  }
 }
 
 function groupByDay(rows: MatchRow[]): { label: string; items: MatchRow[] }[] {

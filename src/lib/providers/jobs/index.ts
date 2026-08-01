@@ -12,6 +12,7 @@ import { WorkableProvider } from './workable';
 import { SmartRecruitersProvider } from './smartrecruiters';
 import { RecruiteeProvider } from './recruitee';
 import { CoresignalProvider } from './coresignal';
+import { OpenAIWebSearchProvider } from './openai-web-search';
 
 const REGISTRY: Record<string, () => JobProvider> = {
   adzuna: () => new AdzunaProvider(),
@@ -25,6 +26,12 @@ const REGISTRY: Record<string, () => JobProvider> = {
   smartrecruiters: () => new SmartRecruitersProvider(),
   recruitee: () => new RecruiteeProvider(),
   coresignal: () => new CoresignalProvider(),
+  // NOTE: openai_web is deliberately NOT in the default JOB_PROVIDERS
+  // list in config.ts. It's expensive (~$0.04/call) and slow (15-30s),
+  // so it's invoked explicitly from /api/run-now on "Find matches now"
+  // clicks, not the nightly cron. Kept in the registry for the manual
+  // invocation path.
+  openai_web: () => new OpenAIWebSearchProvider(),
 };
 
 let _providers: JobProvider[] | undefined;

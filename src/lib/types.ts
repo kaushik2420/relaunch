@@ -52,7 +52,7 @@ export interface UserPreferences {
 
 export interface JobPosting {
   id: string;               // namespaced: 'adzuna:123' / 'gh:razorpay:456'
-  source: 'adzuna' | 'jooble' | 'greenhouse' | 'lever' | 'jsearch' | string;
+  source: 'adzuna' | 'jooble' | 'greenhouse' | 'lever' | 'jsearch' | 'openai_web' | string;
   title: string;
   company: string;
   location: string;
@@ -62,6 +62,30 @@ export interface JobPosting {
   salary?: { min: number; max: number; currency: string; cadence: 'monthly' | 'yearly' };
   workMode: 'remote' | 'hybrid' | 'onsite' | 'unknown';
   keywords?: string[];
+
+  // ---- Optional fields populated only by the OpenAI web-search provider ----
+  // Marks a job that came from OpenAI's live-web discovery so the UI can
+  // show an "AI-discovered" chip and the pipeline can skip our Haiku
+  // verify step (OpenAI already scored + reasoned about it).
+  discoverySource?: 'openai_web';
+  // OpenAI's fit_score (0-100). We trust this directly for OpenAI-sourced
+  // jobs — no re-verify needed. Other providers ignore this field.
+  preVerifiedFitScore?: number;
+  // Human-readable reasons from OpenAI's why_match array. Shown in an
+  // expandable panel on the job card.
+  matchReasons?: string[];
+  // Gaps OpenAI identified between the job requirements and the profile.
+  potentialGaps?: string[];
+  // Evidence URLs OpenAI consulted. Rendered as clickable "Sources"
+  // links on the job card for transparency.
+  evidenceUrls?: string[];
+  // OpenAI's match_level enum. Used for the chip label on the card.
+  matchLevel?:
+    | 'Exceptional Match'
+    | 'Strong Match'
+    | 'Good Match'
+    | 'Possible Match'
+    | 'Weak Match';
 }
 
 export interface TailoredResume {

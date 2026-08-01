@@ -94,12 +94,24 @@ export default async function AdminPage({
     .select("id", { count: "exact", head: true })
     .gte("created_at", since);
 
+  // OpenAI Web Search actual spend (last 30 days) — pulled from the
+  // audit table populated by /api/run-now. Cached rows contribute $0.
+  const { data: openaiCostRows } = await supabaseAdmin()
+    .from("openai_websearch_calls")
+    .select("cost_estimate_usd")
+    .gte("created_at", since);
+  const openaiWebSearchUsd = (openaiCostRows ?? []).reduce(
+    (s, r) => s + (Number(r.cost_estimate_usd) || 0),
+    0,
+  );
+
   const usage = {
     activeUsers: activeUsers ?? 0,
     runs: runRows.length,
     tailoredMatches,
     emails,
     newUsers: newUsers ?? 0,
+    openaiWebSearchUsd,
   };
   const cost = estimateMonthlyCost(usage);
 
@@ -511,6 +523,10 @@ function CostPanel({
         <CostLine label="Claude — resume, cover letter, InMail" value={usd(cost.llmCost)} />
         <CostLine label="Resume parsing — new sign-ups" value={usd(cost.parseCost)} />
         <CostLine label="Email — Resend digests" value={usd(cost.emailCost)} />
+        <CostLine
+          label="OpenAI web search (actual)"
+          value={usd(cost.openaiWebSearchCost)}
+        />
         <CostLine label="Fixed monthly — infra + job APIs" value={usd(cost.fixedMonthly)} />
       </div>
 

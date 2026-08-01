@@ -123,6 +123,21 @@ export async function runDailyForUser(userRow: UserRow): Promise<{ matchesFound:
   const shortlist = ranked.slice(0, 25);
   const verified = await Promise.all(
     shortlist.map(async (r) => {
+      // Fast path: OpenAI Web Search already scored this job with the
+      // full context of the profile + criteria. Trust it and skip the
+      // Haiku call. Saves ~$0.0005/verify × the count of OpenAI-sourced
+      // jobs in the shortlist.
+      if (
+        r.job.discoverySource === 'openai_web' &&
+        typeof r.job.preVerifiedFitScore === 'number'
+      ) {
+        return {
+          ...r,
+          verifyScore: r.job.preVerifiedFitScore,
+          verifyReason:
+            r.job.matchReasons?.[0] ?? 'Pre-scored by OpenAI web search',
+        };
+      }
       try {
         const v = await llm().verifyJobMatch({
           profile,

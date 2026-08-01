@@ -87,6 +87,13 @@ interface SentinelSignals {
     loggedIn24h: number;
   };
   consecutiveHoursWithZeroRuns: number;
+  openaiWebSearch24h: {
+    totalCalls: number;
+    cached: number;
+    errored: number;
+    totalCostUsd: number;
+    topError: string | null;
+  };
 }
 
 /**
@@ -287,6 +294,30 @@ async function gatherSignals(): Promise<SentinelSignals> {
   // in a row is suspicious).
   const consecutiveHoursWithZeroRuns = await countConsecutiveZeroHours(6);
 
+  // OpenAI Web Search 24h signals — high error rate here means the
+  // OPENAI_API_KEY, org quota, or the Responses/web_search endpoint is
+  // in trouble. Cost is surfaced so unexpected billing spikes trigger
+  // an alert before they show up on the OpenAI invoice.
+  const { data: openaiRows } = await admin
+    .from('openai_websearch_calls')
+    .select('cached, error, cost_estimate_usd')
+    .gte('created_at', twentyFourHoursAgo.toISOString());
+  const openaiErrCounts = new Map<string, number>();
+  let openaiCached = 0;
+  let openaiErrored = 0;
+  let openaiCost = 0;
+  for (const r of openaiRows ?? []) {
+    if (r.cached) openaiCached++;
+    if (r.error) {
+      openaiErrored++;
+      const key = fingerprintError(r.error as string);
+      openaiErrCounts.set(key, (openaiErrCounts.get(key) ?? 0) + 1);
+    }
+    openaiCost += Number(r.cost_estimate_usd) || 0;
+  }
+  const topOpenaiError =
+    Array.from(openaiErrCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
   return {
     now: now.toISOString(),
     window1h: { ...w1h, topErrors: topErrors(rows1h ?? []) },
@@ -307,6 +338,13 @@ async function gatherSignals(): Promise<SentinelSignals> {
       loggedIn24h: loggedIn24h ?? 0,
     },
     consecutiveHoursWithZeroRuns,
+    openaiWebSearch24h: {
+      totalCalls: (openaiRows ?? []).length,
+      cached: openaiCached,
+      errored: openaiErrored,
+      totalCostUsd: Number(openaiCost.toFixed(4)),
+      topError: topOpenaiError,
+    },
   };
 }
 
@@ -384,6 +422,8 @@ Reasoning hints (don't include in output):
 - jobMatchesInserted24h == 0 with users.loggedIn24h > 5 → providers silently failing
 - topErrors[0].count / totalRuns > 0.5 → THAT specific error is the culprit; name it
 - Users with profile but no run in 24h despite active status → user selection query issue
+- openaiWebSearch24h.errored / totalCalls > 0.3 → OpenAI web search failing (name topError)
+- openaiWebSearch24h.totalCostUsd unusually high vs recent baseline → potential abuse or a runaway loop; investigate
 
 Output STRICT JSON only, no prose:
 {

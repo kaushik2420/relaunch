@@ -32,6 +32,15 @@ const serverSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL_FAST: z.string().default('gpt-4o-mini'),
   OPENAI_MODEL_QUALITY: z.string().default('gpt-4o'),
+  // OpenAI Web Search — Responses API with hosted web_search tool.
+  // Fires on user-triggered "Find matches now" only, not the nightly
+  // cron. See docs/SETUP_OPENAI_WEBSEARCH.md.
+  OPENAI_MODEL_JOB_SEARCH: z.string().default('gpt-5.6-terra'),
+  OPENAI_WEB_SEARCH_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() !== 'false'),
+  OPENAI_WEB_SEARCH_DAILY_CAP: z.coerce.number().int().positive().default(3),
 
   // Jobs
   JOB_PROVIDERS: z

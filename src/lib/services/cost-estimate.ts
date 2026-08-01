@@ -38,12 +38,17 @@ export interface CostInputs {
   tailoredMatches: number; // sum of jobs_emailed across runs in the window
   emails: number; // runs that sent a digest
   newUsers: number; // users created in the window
+  /** Actual (not estimated) spend on the OpenAI web-search provider,
+   *  summed from openai_websearch_calls.cost_estimate_usd. Populated
+   *  by /admin from a Postgres query. */
+  openaiWebSearchUsd?: number;
 }
 
 export interface CostEstimate {
   llmCost: number;
   parseCost: number;
   emailCost: number;
+  openaiWebSearchCost: number;
   variableCost: number;
   fixedMonthly: number;
   monthlyBurn: number;
@@ -57,7 +62,8 @@ export function estimateMonthlyCost(i: CostInputs): CostEstimate {
   const llmCost = i.tailoredMatches * r.perTailoredMatchUsd;
   const parseCost = i.newUsers * r.perResumeParseUsd;
   const emailCost = i.emails * r.perEmailUsd;
-  const variableCost = llmCost + parseCost + emailCost;
+  const openaiWebSearchCost = i.openaiWebSearchUsd ?? 0;
+  const variableCost = llmCost + parseCost + emailCost + openaiWebSearchCost;
   const monthlyBurn = variableCost + r.fixedMonthlyUsd;
   const perActiveUser = i.activeUsers > 0 ? variableCost / i.activeUsers : 0;
   const projectedAt40 = perActiveUser * 40 + r.fixedMonthlyUsd;
@@ -65,6 +71,7 @@ export function estimateMonthlyCost(i: CostInputs): CostEstimate {
     llmCost,
     parseCost,
     emailCost,
+    openaiWebSearchCost,
     variableCost,
     fixedMonthly: r.fixedMonthlyUsd,
     monthlyBurn,
