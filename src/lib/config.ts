@@ -60,6 +60,19 @@ const serverSchema = z.object({
       const n = v && v.trim() ? Number(v) : NaN;
       return Number.isFinite(n) && n > 0 ? Math.floor(n) : 10;
     }),
+  // Max wall-time for a single OpenAI web-search call. Enriched
+  // criteria + max_results=20 push typical durations to 40-70s, so 30s
+  // was too tight. 90s default gives generous headroom without leaving
+  // hung requests forever. Configurable via env for further tuning.
+  OPENAI_WEB_SEARCH_TIMEOUT_MS: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const n = v && v.trim() ? Number(v) : NaN;
+      return Number.isFinite(n) && n >= 10_000 && n <= 240_000
+        ? Math.floor(n)
+        : 90_000;
+    }),
 
   // Jobs
   JOB_PROVIDERS: z

@@ -27,7 +27,6 @@ import type { JobProvider, JobSearchQuery } from './types';
  */
 
 const ENDPOINT = 'https://api.openai.com/v1/responses';
-const TIMEOUT_MS = 30_000;
 
 // Strict JSON schema — mirrors the handoff spec exactly. Every property
 // is required and additionalProperties=false, per OpenAI's Structured
@@ -202,7 +201,10 @@ export class OpenAIWebSearchProvider implements JobProvider {
     };
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(
+      () => controller.abort(),
+      cfg.OPENAI_WEB_SEARCH_TIMEOUT_MS,
+    );
 
     try {
       const res = await fetch(ENDPOINT, {
@@ -225,7 +227,7 @@ export class OpenAIWebSearchProvider implements JobProvider {
     } catch (err) {
       const isAbort = (err as Error).name === 'AbortError';
       console.error(
-        `[openai-web] ${isAbort ? 'timed out' : 'failed'}: ${(err as Error).message}`,
+        `[openai-web] ${isAbort ? `timed out after ${cfg.OPENAI_WEB_SEARCH_TIMEOUT_MS}ms` : 'failed'}: ${(err as Error).message}`,
       );
       return [];
     } finally {
@@ -276,7 +278,10 @@ export class OpenAIWebSearchProvider implements JobProvider {
     const body = buildRequestBody(cfg, userPrompt);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(
+      () => controller.abort(),
+      cfg.OPENAI_WEB_SEARCH_TIMEOUT_MS,
+    );
     try {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
@@ -318,7 +323,9 @@ export class OpenAIWebSearchProvider implements JobProvider {
         jobs: [],
         sources: [],
         openaiResponseId: null,
-        error: isAbort ? 'timeout after 30s' : (err as Error).message,
+        error: isAbort
+          ? `timeout after ${Math.round(cfg.OPENAI_WEB_SEARCH_TIMEOUT_MS / 1000)}s — try narrowing query or bump OPENAI_WEB_SEARCH_TIMEOUT_MS`
+          : (err as Error).message,
       };
     } finally {
       clearTimeout(timer);
