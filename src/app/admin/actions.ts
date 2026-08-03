@@ -8,6 +8,11 @@ import { serverConfig, publicConfig } from "@/lib/config";
 import { email } from "@/lib/providers/email";
 import { runDailyForAllUsers } from "@/lib/services/backfill-runner";
 import { runSentinel } from "@/lib/services/sentinel";
+import {
+  collectRecipients,
+  sendBroadcast,
+  type BroadcastAudience,
+} from "@/lib/services/broadcast";
 
 /** Redirect away anyone who isn't the configured admin. */
 async function requireAdmin() {
@@ -145,6 +150,90 @@ export async function runSentinelNowAction() {
     redirect(
       "/admin?error=" +
         encodeURIComponent(`Sentinel failed: ${(err as Error).message}`),
+    );
+  }
+}
+
+/**
+ * Preview a broadcast — returns the recipient count for the selected
+ * audience without sending anything. Lets the admin sanity-check
+ * "am I about to email 80 people" before hitting Send.
+ */
+export async function previewBroadcastAction(formData: FormData) {
+  await requireAdmin();
+  const audience = (formData.get("audience") as BroadcastAudience) || "active_invitees";
+  try {
+    const recipients = await collectRecipients(audience);
+    const buckets = recipients.reduce(
+      (acc, r) => {
+        acc[r.audienceBucket] = (acc[r.audienceBucket] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    const summary = [
+      `total:${recipients.length}`,
+      `active:${buckets.active_user ?? 0}`,
+      `invited:${buckets.invited ?? 0}`,
+      `pending:${buckets.pending ?? 0}`,
+    ].join(",");
+    revalidatePath("/admin");
+    redirect(`/admin?bcpreview=${encodeURIComponent(`${audience}|${summary}`)}`);
+  } catch (err) {
+    if ((err as Error).message?.startsWith("NEXT_REDIRECT")) throw err;
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent(`Preview failed: ${(err as Error).message}`),
+    );
+  }
+}
+
+/**
+ * Send a broadcast to the selected audience. Long-running (~1s per
+ * batch of 5 emails). Persists to broadcast_emails + broadcast_recipients
+ * so partial failures aren't lost. On success, redirects back to /admin
+ * with a summary banner.
+ */
+export async function sendBroadcastAction(formData: FormData) {
+  const sb = createSupabaseServer();
+  const { data: { user } } = await sb.auth.getUser();
+  const adminEmail = serverConfig().ADMIN_EMAIL.toLowerCase();
+  if (!user || (user.email ?? "").toLowerCase() !== adminEmail) {
+    redirect("/login");
+  }
+
+  const subject = String(formData.get("subject") ?? "").trim();
+  const bodyHtml = String(formData.get("bodyHtml") ?? "").trim();
+  const audience = ((formData.get("audience") as BroadcastAudience) ||
+    "active_invitees") as BroadcastAudience;
+
+  if (!subject || !bodyHtml) {
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent("Subject and body are both required."),
+    );
+  }
+
+  try {
+    const result = await sendBroadcast({
+      subject,
+      bodyHtml,
+      audience,
+      sentBy: user!.email ?? adminEmail,
+    });
+    const encoded = [
+      result.recipientCount,
+      result.succeeded,
+      result.failed,
+      Math.round(result.durationMs / 1000),
+    ].join(",");
+    revalidatePath("/admin");
+    redirect(`/admin?bcresult=${encodeURIComponent(encoded)}`);
+  } catch (err) {
+    if ((err as Error).message?.startsWith("NEXT_REDIRECT")) throw err;
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent(`Broadcast failed: ${(err as Error).message}`),
     );
   }
 }

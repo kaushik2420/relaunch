@@ -6,8 +6,10 @@ import { serverConfig } from "@/lib/config";
 import { Logo } from "@/components/Logo";
 import {
   approveAndInviteAction,
+  previewBroadcastAction,
   runDailyDigestForAllAction,
   runSentinelNowAction,
+  sendBroadcastAction,
 } from "./actions";
 import {
   estimateMonthlyCost,
@@ -44,6 +46,8 @@ export default async function AdminPage({
     invited?: string;
     backfill?: string;
     sentinel?: string;
+    bcpreview?: string;
+    bcresult?: string;
   };
 }) {
   const sb = createSupabaseServer();
@@ -265,6 +269,11 @@ export default async function AdminPage({
             </span>
           </div>
         </div>
+
+        <BroadcastPanel
+          preview={searchParams.bcpreview}
+          result={searchParams.bcresult}
+        />
 
         {/* ---- Users & activity ---- */}
         <div className="mt-12 flex items-baseline gap-3">
@@ -614,6 +623,197 @@ function CostLine({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+/** Broadcast panel — draft + send an announcement email to a chosen
+ *  audience (active users, active + invitees, or everyone). Pre-fills
+ *  a launch template for the AI-discovered feature. Preview shows the
+ *  recipient count before sending. Long-running: send happens
+ *  server-side, redirects back with a summary banner. */
+function BroadcastPanel({
+  preview,
+  result,
+}: {
+  preview?: string;
+  result?: string;
+}) {
+  // Preview format: "audience|total:N,active:N,invited:N,pending:N"
+  let previewAudience = '';
+  let previewCounts: Record<string, number> = {};
+  if (preview) {
+    const [aud, summary] = decodeURIComponent(preview).split('|');
+    previewAudience = aud ?? '';
+    for (const kv of (summary ?? '').split(',')) {
+      const [k, v] = kv.split(':');
+      if (k && v) previewCounts[k] = Number(v) || 0;
+    }
+  }
+  // Result format: "recipientCount,succeeded,failed,seconds"
+  let sentSummary: {
+    recipients: number;
+    succeeded: number;
+    failed: number;
+    seconds: number;
+  } | null = null;
+  if (result) {
+    const parts = decodeURIComponent(result).split(',').map((n) => Number(n) || 0);
+    sentSummary = {
+      recipients: parts[0] ?? 0,
+      succeeded: parts[1] ?? 0,
+      failed: parts[2] ?? 0,
+      seconds: parts[3] ?? 0,
+    };
+  }
+
+  return (
+    <div className="mt-8 rounded-xl border border-line bg-surface p-5">
+      <h2 className="text-lg font-bold">Broadcast email</h2>
+      <p className="mt-1 text-sm text-ink-soft">
+        Draft and send an announcement to your audience. Use{" "}
+        <code className="rounded bg-surface-page px-1 text-xs">{`{{firstName}}`}</code>{" "}
+        in the body — it gets replaced with the recipient&apos;s first name
+        (or &ldquo;friend&rdquo; when absent). Sends via Resend, one row
+        per recipient logged to broadcast_recipients.
+      </p>
+
+      {sentSummary && (
+        <div
+          className={`mt-3 rounded-lg border p-3 text-sm ${
+            sentSummary.failed === 0
+              ? "border-success/30 bg-success-soft text-ink"
+              : "border-warn/30 bg-warn-soft text-ink"
+          }`}
+        >
+          {sentSummary.failed === 0
+            ? `✅ Broadcast sent — ${sentSummary.succeeded}/${sentSummary.recipients} succeeded in ${sentSummary.seconds}s.`
+            : `⚠️ Broadcast partial — ${sentSummary.succeeded} sent, ${sentSummary.failed} failed in ${sentSummary.seconds}s. Check broadcast_recipients for errors.`}
+        </div>
+      )}
+
+      {preview && Object.keys(previewCounts).length > 0 && (
+        <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50/50 p-3 text-sm">
+          <div className="font-semibold text-brand-700">
+            📬 Would send to {previewCounts.total ?? 0} recipients ({previewAudience})
+          </div>
+          <div className="mt-1 text-xs text-ink-soft">
+            Active users: {previewCounts.active ?? 0} · Invited: {previewCounts.invited ?? 0}
+            {" · "}Pending waitlist: {previewCounts.pending ?? 0}
+          </div>
+        </div>
+      )}
+
+      <form action={sendBroadcastAction} className="mt-4 space-y-3">
+        <div>
+          <label className="label">Audience</label>
+          <select
+            name="audience"
+            className="input"
+            defaultValue="active_invitees"
+            form=""
+          >
+            <option value="active">Active users only</option>
+            <option value="active_invitees">
+              Active users + invitees (recommended for feature launches)
+            </option>
+            <option value="everyone">
+              Everyone (active + invited + pending waitlist)
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label className="label">Subject</label>
+          <input
+            name="subject"
+            type="text"
+            className="input"
+            defaultValue={AI_DISCOVERED_TEMPLATE.subject}
+            required
+          />
+        </div>
+
+        <div>
+          <label className="label">Body (HTML)</label>
+          <textarea
+            name="bodyHtml"
+            className="input font-mono text-xs"
+            rows={16}
+            defaultValue={AI_DISCOVERED_TEMPLATE.body}
+            required
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <SubmitButton
+            className="btn-primary"
+            pendingLabel="Sending… (may take 30-90s)"
+          >
+            Send broadcast
+          </SubmitButton>
+          <span className="text-xs text-ink-mute">
+            No confirmation dialog — click sends immediately to the selected audience.
+          </span>
+        </div>
+      </form>
+
+      {/* Preview button lives in a SEPARATE form so it doesn't require
+          subject/body — just posts audience for the count. */}
+      <form action={previewBroadcastAction} className="mt-3">
+        <details className="text-xs text-ink-soft">
+          <summary className="cursor-pointer hover:text-ink">
+            Not sure how many people this reaches? Preview recipient count →
+          </summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              name="audience"
+              className="input"
+              defaultValue="active_invitees"
+            >
+              <option value="active">Active users only</option>
+              <option value="active_invitees">Active + invitees</option>
+              <option value="everyone">Everyone</option>
+            </select>
+            <SubmitButton className="btn-soft" pendingLabel="Counting…">
+              Preview count
+            </SubmitButton>
+          </div>
+        </details>
+      </form>
+    </div>
+  );
+}
+
+const AI_DISCOVERED_TEMPLATE = {
+  subject: "New in Relaunch: AI-discovered jobs from the live web ✨",
+  body: `<div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:560px;margin:0 auto;color:#1C2220;line-height:1.55;">
+  <h2 style="color:#1A3826;margin:0 0 12px;">Hey {{firstName}},</h2>
+
+  <p>A few of you told us the daily match feed felt too narrow &mdash; missing the roles you were actually finding on LinkedIn or company career pages. Fair. We fixed it.</p>
+
+  <p><strong>New feature: ✨ AI-discovered jobs.</strong></p>
+
+  <p>Click <strong>Find matches now</strong> on your dashboard and, alongside our existing 11 job sources, Relaunch now asks OpenAI to search the live web for you &mdash; LinkedIn Jobs, Indeed, employer career pages, ATS listings &mdash; reads 30-50 sources per search, and ranks them against your profile. Each result comes with:</p>
+
+  <ul style="padding-left:20px;">
+    <li>A fit score and match reasoning</li>
+    <li>Visible evidence links so you can see where we found it</li>
+    <li>A direct apply URL (usually the employer's own page)</li>
+  </ul>
+
+  <p style="margin:20px 0;">
+    <a href="https://www.get-relaunch.com/dashboard?utm_source=email&amp;utm_campaign=ai-discovered-launch"
+       style="background:#2C5239;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;display:inline-block;">
+      Try it now &rarr;
+    </a>
+  </p>
+
+  <p style="font-size:13px;color:#58665C;">Look for the <strong style="color:#2C5239;">✨ AI-discovered</strong> chip on job cards in your dashboard.</p>
+
+  <p style="font-size:13px;color:#58665C;margin-top:24px;">
+    Have feedback? Just reply to this email &mdash; I read every one.<br/>
+    &mdash; Kaushik
+  </p>
+</div>`,
+};
 
 /** Sentinel panel — open-alerts list + last runs + "run now" button.
  *  Sits at the very top of /admin so problems are the first thing you
