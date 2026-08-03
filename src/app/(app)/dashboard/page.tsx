@@ -53,6 +53,76 @@ export default async function DashboardPage({
     }
   }
 
+  // Also pull OpenAI-sourced job_matches rows from the last 7 days —
+  // these never get written to the Sheet (they're persisted directly
+  // to job_matches by /api/run-now with rich metadata). Without this
+  // merge, high-match AI-discovered jobs are invisible on /dashboard.
+  const openaiSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: openaiJobRows } = await supabaseAdmin()
+    .from('job_matches')
+    .select('apply_url, job_title, company, match_percent, verify_score, openai_metadata, created_at, tailored_resume_pdf_url, tailored_resume_doc_url, cover_letter_pdf_url, cover_letter_doc_url')
+    .eq('user_id', user.id)
+    .eq('ats', 'openai_web')
+    .gte('created_at', openaiSince)
+    .order('match_percent', { ascending: false, nullsFirst: false })
+    .limit(30);
+
+  // Dedup: if the sheet already has a row for the same apply_url, keep
+  // the sheet version (it has tailored resumes, InMail drafts, etc.).
+  const sheetUrlSet = new Set(matches.map((m) => classifyAtsUrl(m.jobUrl ?? '').canonical));
+  interface OpenAIJobRow {
+    apply_url: string;
+    job_title: string;
+    company: string;
+    match_percent: number | null;
+    verify_score: number | null;
+    openai_metadata: {
+      match_level?: string;
+      location?: string;
+      work_mode?: string;
+      match_reasons?: string[];
+    } | null;
+    created_at: string;
+    tailored_resume_pdf_url: string | null;
+    tailored_resume_doc_url: string | null;
+    cover_letter_pdf_url: string | null;
+    cover_letter_doc_url: string | null;
+  }
+  const openaiMatches: SheetMatchRow[] = (openaiJobRows ?? [])
+    .filter((r) => {
+      const url = classifyAtsUrl((r.apply_url as string) ?? '').canonical;
+      return !sheetUrlSet.has(url);
+    })
+    .map((r) => {
+      const meta = ((r as OpenAIJobRow).openai_metadata ?? {}) as NonNullable<OpenAIJobRow['openai_metadata']>;
+      return {
+        date: (r.created_at as string).slice(0, 10),
+        company: r.company as string,
+        role: r.job_title as string,
+        matchPercent: Number(r.match_percent) || Number(r.verify_score) || 0,
+        location: (meta.location ?? '') as string,
+        mode: (meta.work_mode ?? '') as string,
+        expectedCtc: '',
+        jobUrl: r.apply_url as string,
+        tailoredResumeUrl: (r.tailored_resume_pdf_url as string) ?? '',
+        tailoredResumeDocUrl: (r.tailored_resume_doc_url as string) ?? '',
+        coverLetterUrl: (r.cover_letter_pdf_url as string) ?? '',
+        coverLetterDocUrl: (r.cover_letter_doc_url as string) ?? '',
+        referrers: '',
+        inmailSubject: '',
+        applied: false,
+        outcome: '',
+        notes: (meta.match_reasons ?? []).slice(0, 2).join(' · '),
+        reaction: '',
+        source: 'openai_web',
+      } satisfies SheetMatchRow;
+    });
+
+  // Merge with OpenAI matches ahead of sheet-only matches so they land
+  // near the top of the "best" sort by default. MatchesView's own sort
+  // will re-order by matchPercent anyway.
+  matches = [...openaiMatches, ...matches];
+
   // Augment each sheet match with:
   //   - applied: true if the Sheet's Applied? col is Yes, OR if the
   //     job_matches.applied_at column is set for this URL

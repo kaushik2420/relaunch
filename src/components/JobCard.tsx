@@ -85,6 +85,14 @@ export function JobCard({ m }: { m: SheetMatchRow }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <h3 className="text-base font-semibold">{m.role}</h3>
+            {m.source === 'openai_web' && (
+              <span
+                className="chip text-[10px] bg-brand-500 text-white"
+                title="Discovered from the live web by OpenAI"
+              >
+                ✨ AI-discovered
+              </span>
+            )}
             {m.watched && (
               <span
                 className="chip text-[10px]"
