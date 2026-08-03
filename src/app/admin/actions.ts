@@ -11,6 +11,7 @@ import { runSentinel } from "@/lib/services/sentinel";
 import {
   collectRecipients,
   sendBroadcast,
+  sendBroadcastToEmails,
   type BroadcastAudience,
 } from "@/lib/services/broadcast";
 
@@ -219,6 +220,67 @@ export async function sendBroadcastAction(formData: FormData) {
       subject,
       bodyHtml,
       audience,
+      sentBy: user!.email ?? adminEmail,
+    });
+    const encoded = [
+      result.recipientCount,
+      result.succeeded,
+      result.failed,
+      Math.round(result.durationMs / 1000),
+    ].join(",");
+    revalidatePath("/admin");
+    redirect(`/admin?bcresult=${encodeURIComponent(encoded)}`);
+  } catch (err) {
+    if ((err as Error).message?.startsWith("NEXT_REDIRECT")) throw err;
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent(`Broadcast failed: ${(err as Error).message}`),
+    );
+  }
+}
+
+/**
+ * Ad-hoc broadcast to a manually-entered email list. Used to retry
+ * the failures from an earlier broadcast, or to send a one-off to a
+ * curated list. Same subject + body_html mechanics as sendBroadcast().
+ */
+export async function sendBroadcastToListAction(formData: FormData) {
+  const sb = createSupabaseServer();
+  const { data: { user } } = await sb.auth.getUser();
+  const adminEmail = serverConfig().ADMIN_EMAIL.toLowerCase();
+  if (!user || (user.email ?? "").toLowerCase() !== adminEmail) {
+    redirect("/login");
+  }
+
+  const subject = String(formData.get("subject") ?? "").trim();
+  const bodyHtml = String(formData.get("bodyHtml") ?? "").trim();
+  const emailsRaw = String(formData.get("emails") ?? "");
+
+  if (!subject || !bodyHtml) {
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent("Subject and body are both required."),
+    );
+  }
+
+  // Accept both comma- and newline-separated lists so paste-from-anywhere
+  // just works.
+  const emails = emailsRaw
+    .split(/[\s,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  if (emails.length === 0) {
+    redirect(
+      "/admin?error=" +
+        encodeURIComponent("Provide at least one email address."),
+    );
+  }
+
+  try {
+    const result = await sendBroadcastToEmails({
+      emails,
+      subject,
+      bodyHtml,
       sentBy: user!.email ?? adminEmail,
     });
     const encoded = [

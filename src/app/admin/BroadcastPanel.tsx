@@ -4,6 +4,7 @@ import { SubmitButton } from '@/components/SubmitButton';
 import {
   previewBroadcastAction,
   sendBroadcastAction,
+  sendBroadcastToListAction,
 } from './actions';
 
 const AI_DISCOVERED_TEMPLATE = {
@@ -42,6 +43,12 @@ const AI_DISCOVERED_TEMPLATE = {
 interface Props {
   countPreview?: string;
   result?: string;
+  /** Emails that failed in the most recent broadcast — pre-fills the
+   *  "Send to specific emails" textarea so retrying takes one click. */
+  lastFailedEmails?: string[];
+  /** Subject of that broadcast, shown alongside the load-failed button
+   *  so the admin can tell which broadcast it refers to. */
+  lastFailedSubject?: string | null;
 }
 
 /**
@@ -51,11 +58,21 @@ interface Props {
  * submits — this component just adds the visual preview affordance
  * on top.
  */
-export function BroadcastPanel({ countPreview, result }: Props) {
+export function BroadcastPanel({
+  countPreview,
+  result,
+  lastFailedEmails = [],
+  lastFailedSubject = null,
+}: Props) {
   const [subject, setSubject] = useState(AI_DISCOVERED_TEMPLATE.subject);
   const [bodyHtml, setBodyHtml] = useState(AI_DISCOVERED_TEMPLATE.body);
   const [previewFirstName, setPreviewFirstName] = useState('Kaushik');
   const [showPreview, setShowPreview] = useState(false);
+  const [manualEmails, setManualEmails] = useState('');
+  const parsedManualCount = manualEmails
+    .split(/[\s,;]+/)
+    .map((e) => e.trim())
+    .filter((e) => /^\S+@\S+\.\S+$/.test(e)).length;
 
   // Simple client-side {{firstName}} interpolation for the preview.
   // Server does the real substitution per-recipient at send time.
@@ -237,6 +254,65 @@ export function BroadcastPanel({ countPreview, result }: Props) {
           </span>
         </div>
       </form>
+
+      {/* ---- Send to specific emails (manual list / retry) ----
+          Shares the subject + body_html from the main form above, so
+          you edit once and retry / send to a curated list without
+          re-typing content. Uses hidden inputs to forward the current
+          state into this form's submit. */}
+      <div className="mt-6 rounded-lg border border-line bg-surface-page p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold">Send to specific emails</h3>
+            <p className="mt-0.5 text-xs text-ink-soft">
+              Comma-, space-, or newline-separated list. Uses the subject
+              + body from above. Skip audience — sends to exactly the
+              emails you type.
+            </p>
+          </div>
+          {lastFailedEmails.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setManualEmails(lastFailedEmails.join(', '))}
+              className="btn-soft text-xs whitespace-nowrap"
+              title={
+                lastFailedSubject
+                  ? `Failed on: "${lastFailedSubject}"`
+                  : 'Load failed emails from the last broadcast'
+              }
+            >
+              Load {lastFailedEmails.length} failed from last broadcast ↩
+            </button>
+          )}
+        </div>
+
+        <form action={sendBroadcastToListAction} className="mt-3 space-y-2">
+          <input type="hidden" name="subject" value={subject} />
+          <input type="hidden" name="bodyHtml" value={bodyHtml} />
+          <textarea
+            name="emails"
+            className="input font-mono text-xs"
+            rows={5}
+            placeholder={`user1@example.com, user2@example.com\nor one per line`}
+            value={manualEmails}
+            onChange={(e) => setManualEmails(e.target.value)}
+            required
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <SubmitButton
+              className="btn-primary text-sm"
+              pendingLabel="Sending…"
+            >
+              Send to these {parsedManualCount > 0 ? parsedManualCount : ''} email{parsedManualCount === 1 ? '' : 's'}
+            </SubmitButton>
+            <span className="text-xs text-ink-mute">
+              {parsedManualCount > 0
+                ? `Parsed ${parsedManualCount} valid address${parsedManualCount === 1 ? '' : 'es'}. Uses the subject + body from the form above.`
+                : 'Type or paste email addresses above.'}
+            </span>
+          </div>
+        </form>
+      </div>
 
       {/* Recipient count preview lives in a separate form so it doesn't
           require subject/body. */}

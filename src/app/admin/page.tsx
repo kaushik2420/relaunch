@@ -10,6 +10,7 @@ import {
   runSentinelNowAction,
 } from "./actions";
 import { BroadcastPanel } from "./BroadcastPanel";
+import { getLastBroadcastFailures } from "@/lib/services/broadcast";
 import {
   estimateMonthlyCost,
   type CostEstimate,
@@ -199,6 +200,11 @@ export default async function AdminPage({
     notified: boolean;
   }>;
 
+  // Pull the failure list from the most recent broadcast so the
+  // manual-resend section can auto-populate. Cheap query — one row +
+  // one join.
+  const lastFailed = await getLastBroadcastFailures();
+
   return (
     <main className="min-h-screen bg-surface-page">
       <nav className="flex items-center justify-between border-b border-line bg-surface px-6 py-3.5">
@@ -272,6 +278,8 @@ export default async function AdminPage({
         <BroadcastPanel
           countPreview={searchParams.bcpreview}
           result={searchParams.bcresult}
+          lastFailedEmails={lastFailed.emails}
+          lastFailedSubject={lastFailed.subject}
         />
 
         {/* ---- Users & activity ---- */}

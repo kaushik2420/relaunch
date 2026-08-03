@@ -238,6 +238,189 @@ export async function sendBroadcast(input: {
   };
 }
 
+/**
+ * Ad-hoc send: hand it a raw list of email addresses and it delivers
+ * the same subject + body_html to each one. Used for retrying failed
+ * recipients from an earlier broadcast, or one-off sends to a curated
+ * list the admin typed in.
+ *
+ * Persists to the same broadcast_emails / broadcast_recipients tables
+ * as sendBroadcast(), with audience='manual_list' so it's clearly
+ * distinguishable from the audience-preset broadcasts.
+ *
+ * Tries to look up the first_name for each email so the {{firstName}}
+ * substitution still works — checks users.first_name first, then
+ * waitlist.first_name.
+ */
+export async function sendBroadcastToEmails(input: {
+  emails: string[];
+  subject: string;
+  bodyHtml: string;
+  sentBy: string;
+}): Promise<BroadcastResult> {
+  const start = Date.now();
+  const admin = supabaseAdmin();
+
+  // Dedup + normalise. Filter obvious junk so we don't waste a
+  // broadcast row on empty strings.
+  const clean = Array.from(
+    new Set(
+      input.emails
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => /^\S+@\S+\.\S+$/.test(e)),
+    ),
+  );
+
+  // Best-effort first-name lookup per email so {{firstName}} still
+  // works. Falls back to 'friend' when we don't recognize the email.
+  const firstNameByEmail = new Map<string, string | null>();
+  if (clean.length > 0) {
+    const [{ data: userRows }, { data: waitlistRows }] = await Promise.all([
+      admin.from('users').select('email, first_name').in('email', clean),
+      admin.from('waitlist').select('email, first_name').in('email', clean),
+    ]);
+    for (const r of userRows ?? []) {
+      firstNameByEmail.set(
+        (r.email as string).toLowerCase(),
+        (r.first_name as string | null) ?? null,
+      );
+    }
+    for (const r of waitlistRows ?? []) {
+      const k = (r.email as string).toLowerCase();
+      if (!firstNameByEmail.has(k)) {
+        firstNameByEmail.set(k, (r.first_name as string | null) ?? null);
+      }
+    }
+  }
+
+  const recipients: BroadcastRecipient[] = clean.map((email) => ({
+    email,
+    firstName: firstNameByEmail.get(email) ?? null,
+    audienceBucket: 'manual' as unknown as BroadcastRecipient['audienceBucket'],
+  }));
+
+  const { data: broadcast, error: bErr } = await admin
+    .from('broadcast_emails')
+    .insert({
+      sent_by: input.sentBy,
+      subject: input.subject,
+      body_html: input.bodyHtml,
+      audience: 'manual_list',
+      recipient_count: recipients.length,
+    })
+    .select('id')
+    .single();
+  if (bErr || !broadcast) {
+    throw new Error(`Failed to create broadcast row: ${bErr?.message ?? 'unknown'}`);
+  }
+  const broadcastId = broadcast.id as string;
+
+  const failures: BroadcastResult['failures'] = [];
+  let succeeded = 0;
+  let failed = 0;
+
+  for (let i = 0; i < recipients.length; i += PARALLEL) {
+    const chunk = recipients.slice(i, i + PARALLEL);
+    const results = await Promise.allSettled(
+      chunk.map(async (r) => {
+        const firstName = (r.firstName ?? '').trim() || 'friend';
+        const bodyForR = input.bodyHtml.replace(
+          /\{\{\s*firstName\s*\}\}/g,
+          escapeHtml(firstName),
+        );
+        try {
+          await emailProvider().send({
+            to: r.email,
+            subject: input.subject,
+            html: bodyForR,
+          });
+          return { ok: true as const, r };
+        } catch (err) {
+          return { ok: false as const, r, error: (err as Error).message };
+        }
+      }),
+    );
+    const rows = results.map((res, idx) => {
+      const r = chunk[idx]!;
+      if (res.status === 'fulfilled' && res.value.ok) {
+        succeeded++;
+        return {
+          broadcast_id: broadcastId,
+          email: r.email,
+          first_name: r.firstName,
+          audience_bucket: 'manual',
+          status: 'sent' as const,
+          error: null,
+        };
+      }
+      const errMsg: string =
+        res.status === 'fulfilled' && !res.value.ok
+          ? res.value.error
+          : res.status === 'rejected'
+            ? (res.reason as Error)?.message ?? 'unknown'
+            : 'unknown';
+      failed++;
+      failures.push({ email: r.email, error: errMsg });
+      return {
+        broadcast_id: broadcastId,
+        email: r.email,
+        first_name: r.firstName,
+        audience_bucket: 'manual',
+        status: 'failed' as const,
+        error: errMsg.slice(0, 400),
+      };
+    });
+    if (rows.length > 0) {
+      await admin.from('broadcast_recipients').insert(rows);
+    }
+  }
+
+  const durationMs = Date.now() - start;
+  await admin
+    .from('broadcast_emails')
+    .update({ succeeded, failed, duration_ms: durationMs })
+    .eq('id', broadcastId);
+
+  return {
+    broadcastId,
+    recipientCount: recipients.length,
+    succeeded,
+    failed,
+    durationMs,
+    failures,
+  };
+}
+
+/**
+ * Fetch the list of emails that failed on the most recent broadcast.
+ * Used by the admin UI to pre-fill the manual-resend textarea.
+ */
+export async function getLastBroadcastFailures(): Promise<{
+  broadcastId: string | null;
+  subject: string | null;
+  emails: string[];
+}> {
+  const admin = supabaseAdmin();
+  const { data: latest } = await admin
+    .from('broadcast_emails')
+    .select('id, subject, failed')
+    .gt('failed', 0)
+    .order('sent_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!latest) return { broadcastId: null, subject: null, emails: [] };
+  const { data: rows } = await admin
+    .from('broadcast_recipients')
+    .select('email')
+    .eq('broadcast_id', latest.id)
+    .eq('status', 'failed');
+  return {
+    broadcastId: latest.id as string,
+    subject: (latest.subject as string) ?? null,
+    emails: (rows ?? []).map((r) => r.email as string),
+  };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     (
