@@ -654,10 +654,11 @@ function mapJob(r: RawJob): JobPosting | null {
         ? 'onsite'
         : 'unknown';
 
-  // Posted date: OpenAI returns YYYY-MM-DD strings, or empty if unknown.
-  const postedAt = r.posted_date && r.date_status !== 'unknown'
-    ? new Date(r.posted_date).toISOString()
-    : new Date().toISOString();
+  // Posted date: OpenAI is *supposed* to return YYYY-MM-DD but sometimes
+  // emits free-form strings like "recently", "2 days ago", or partial
+  // dates ("2026-08"). new Date("recently").toISOString() throws
+  // "Invalid time value" — was surfacing to users as ai-search errors.
+  const postedAt = safeToIso(r.posted_date, r.date_status);
 
   const evidenceUrls = (r.evidence_urls ?? [])
     .map(normalizeUrl)
@@ -757,6 +758,26 @@ function collectParseDebug(
       incompleteDetails,
     };
   }
+}
+
+/**
+ * Coerce whatever the model returned in posted_date into a valid ISO
+ * timestamp. Handles:
+ *   - empty / null / date_status='unknown'  → now
+ *   - free-form strings ("recently", "2d ago") → now
+ *   - partial dates ("2026-08") → parsed if possible, else now
+ *   - valid YYYY-MM-DD or ISO strings → parsed
+ * Never throws — the calling mapper used to blow up on bad dates and
+ * cascade into a user-visible "invalid time value" error.
+ */
+function safeToIso(
+  dateStr: string | null | undefined,
+  dateStatus?: string,
+): string {
+  if (!dateStr || dateStatus === 'unknown') return new Date().toISOString();
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return new Date().toISOString();
+  return d.toISOString();
 }
 
 function normalizeUrl(v?: string): string {
