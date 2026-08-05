@@ -27,11 +27,15 @@ export function NavTabs({
   daysLeft,
   userInitial,
   userEmail,
+  isAdmin = false,
 }: {
   trialStatus: TrialStatus;
   daysLeft: number;
   userInitial: string;
   userEmail: string;
+  /** Admin-only flag from the server layout — currently gates the
+   *  Mentors nav item until the feature is opened up to all users. */
+  isAdmin?: boolean;
 }) {
   const pathname = usePathname();
 
@@ -64,7 +68,7 @@ export function NavTabs({
         <PrimaryTab href="/all-matches" pathname={pathname}>
           Matches
         </PrimaryTab>
-        <ToolsMenu pathname={pathname} />
+        <ToolsMenu pathname={pathname} isAdmin={isAdmin} />
       </div>
 
       <UserMenu
@@ -105,7 +109,13 @@ function PrimaryTab({
  * nav stays uncluttered. Both are secondary "when needed" features
  * rather than daily-use pages.
  */
-function ToolsMenu({ pathname }: { pathname: string }) {
+function ToolsMenu({
+  pathname,
+  isAdmin,
+}: {
+  pathname: string;
+  isAdmin: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const active =
@@ -162,13 +172,15 @@ function ToolsMenu({ pathname }: { pathname: string }) {
           role="menu"
           className="absolute right-0 z-20 mt-1 min-w-[200px] rounded-lg border border-line bg-white py-1 shadow-lg"
         >
-          <MenuLink
-            href="/mentors"
-            active={pathname.startsWith('/mentors')}
-            onClick={() => setOpen(false)}
-          >
-            🤝 Mentors — 1:1 sessions
-          </MenuLink>
+          {isAdmin && (
+            <MenuLink
+              href="/mentors"
+              active={pathname.startsWith('/mentors')}
+              onClick={() => setOpen(false)}
+            >
+              🤝 Mentors — 1:1 sessions
+            </MenuLink>
+          )}
           <MenuLink
             href="/boost"
             active={pathname.startsWith('/boost')}

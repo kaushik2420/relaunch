@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
+import { serverConfig } from '@/lib/config';
 import { listActiveMentors } from '@/lib/services/mentors';
 import { MentorsGrid } from './MentorsGrid';
 
@@ -11,6 +12,17 @@ export default async function MentorsPage() {
     data: { user },
   } = await sb.auth.getUser();
   if (!user) redirect('/login');
+
+  // Feature-flag gate: Mentors is admin-only until we open it up.
+  // Non-admin users get bounced to the dashboard silently — the nav
+  // entry is also hidden client-side, so this is a defense-in-depth
+  // guard against people typing /mentors directly.
+  if (
+    (user.email ?? '').toLowerCase() !==
+    serverConfig().ADMIN_EMAIL.toLowerCase()
+  ) {
+    redirect('/dashboard');
+  }
 
   const mentors = await listActiveMentors();
 

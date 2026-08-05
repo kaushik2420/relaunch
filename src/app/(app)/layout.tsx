@@ -4,6 +4,7 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { Logo } from "@/components/Logo";
 import { NavTabs } from "@/components/NavTabs";
 import { evaluateTrial } from "@/lib/services/billing";
+import { serverConfig } from "@/lib/config";
 import { PostHogIdentifier } from "@/components/PostHogIdentifier";
 import { SessionHeartbeat } from "@/components/SessionHeartbeat";
 
@@ -89,6 +90,10 @@ export default async function AppLayout({
           daysLeft={trial.daysLeft}
           userInitial={initial}
           userEmail={user.email!}
+          isAdmin={
+            (user.email ?? '').toLowerCase() ===
+            serverConfig().ADMIN_EMAIL.toLowerCase()
+          }
         />
       </nav>
       <PostHogIdentifier userId={user.id} email={user.email!} />
