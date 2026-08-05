@@ -111,7 +111,8 @@ function ToolsMenu({ pathname }: { pathname: string }) {
   const active =
     pathname.startsWith('/polish') ||
     pathname.startsWith('/upskill') ||
-    pathname.startsWith('/boost');
+    pathname.startsWith('/boost') ||
+    pathname.startsWith('/mentors');
 
   useEffect(() => {
     if (!open) return;
@@ -161,6 +162,13 @@ function ToolsMenu({ pathname }: { pathname: string }) {
           role="menu"
           className="absolute right-0 z-20 mt-1 min-w-[200px] rounded-lg border border-line bg-white py-1 shadow-lg"
         >
+          <MenuLink
+            href="/mentors"
+            active={pathname.startsWith('/mentors')}
+            onClick={() => setOpen(false)}
+          >
+            🤝 Mentors — 1:1 sessions
+          </MenuLink>
           <MenuLink
             href="/boost"
             active={pathname.startsWith('/boost')}

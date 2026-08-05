@@ -221,6 +221,12 @@ export default async function AdminPage({
           >
             Distribution leads →
           </Link>
+          <Link
+            href="/admin/mentors"
+            className="text-sm font-semibold text-brand-700 hover:underline"
+          >
+            Mentors →
+          </Link>
         </div>
 
         <SentinelPanel
