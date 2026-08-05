@@ -73,6 +73,19 @@ const serverSchema = z.object({
         ? Math.floor(n)
         : 90_000;
     }),
+  // How many of the top OpenAI-discovered jobs (by fit_score) get
+  // full tailoring (resume + cover letter + InMail + Drive PDFs) on
+  // a "Find matches now" click. Rest land as summary-only rows with
+  // Tailor-on-demand available via the extension. At ~$0.08 Sonnet
+  // spend per tailored job, this is the biggest single lever for
+  // per-user cost.
+  OPENAI_AUTO_TAILOR_CAP: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const n = v && v.trim() ? Number(v) : NaN;
+      return Number.isFinite(n) && n >= 0 && n <= 20 ? Math.floor(n) : 3;
+    }),
 
   // Jobs
   JOB_PROVIDERS: z

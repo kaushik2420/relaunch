@@ -11,6 +11,8 @@ import {
 import type { JobPosting, UserProfile } from "@/lib/types";
 import { canonicalLocationLabels } from "@/lib/locations";
 import { findRoleFamily } from "@/lib/role-families";
+import { tailorMatch } from "@/lib/services/tailor-match";
+import { decrypt } from "@/lib/crypto";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -102,8 +104,18 @@ export async function POST(_req: NextRequest) {
     // dashboard alongside the aggregator matches. Kept separate from
     // runDailyForUser's own persistence path so the two flows don't
     // fight over the same rows.
+    let tailoredOpenAICount = 0;
     if (openaiResult.jobs.length > 0) {
       await persistOpenAIJobs(userRow.id, openaiResult.jobs);
+      // Auto-tailor the top OPENAI_AUTO_TAILOR_CAP jobs (default 3):
+      // Sonnet-tailored resume + cover letter + InMail draft + Drive
+      // PDFs. Same treatment as the top-5 aggregator matches get in
+      // the nightly digest. Runs after persist so if tailoring fails
+      // the row still exists as a summary.
+      tailoredOpenAICount = await tailorTopOpenAIJobs(
+        userRow,
+        openaiResult.jobs,
+      );
     }
 
     await admin.from("job_runs").insert({
@@ -124,6 +136,7 @@ export async function POST(_req: NextRequest) {
       providers,
       openai: {
         jobsFound: openaiResult.jobs.length,
+        jobsTailored: tailoredOpenAICount,
         cached: openaiResult.skipped === "cached",
         skipped: openaiResult.skipped ?? null,
         error: openaiResult.error ?? null,
@@ -385,4 +398,108 @@ async function persistOpenAIJobs(
   if (error) {
     console.error("[run-now] persistOpenAIJobs failed", error);
   }
+}
+
+/**
+ * Auto-tailor the top OpenAI-discovered jobs. For each: tailor the
+ * résumé + draft a cover letter + draft an InMail + save PDF/Doc to
+ * the user's Drive (if OAuth connected). Persists the results back
+ * to the same job_matches row so /all-matches renders them with a
+ * ✓ Tailored chip and working download buttons.
+ *
+ * Bounded by OPENAI_AUTO_TAILOR_CAP (default 3) so a run-now call
+ * doesn't spend $2 in Sonnet on 20 tailored résumés.
+ *
+ * Each job's tailor step runs in parallel — Sonnet handles that fine
+ * and users have already waited 20-40s for the search. Individual
+ * failures are caught and logged; other jobs still succeed.
+ */
+async function tailorTopOpenAIJobs(
+  userRow: UserRow,
+  jobs: JobPosting[],
+): Promise<number> {
+  const cfg = serverConfig();
+  const cap = cfg.OPENAI_AUTO_TAILOR_CAP;
+  if (cap === 0 || jobs.length === 0) return 0;
+
+  const profile = userRow.profile as UserProfile;
+  const admin = supabaseAdmin();
+
+  // Highest fit_score first — tailor the ones users are most likely
+  // to actually apply to.
+  const sorted = [...jobs].sort(
+    (a, b) => (b.preVerifiedFitScore ?? 0) - (a.preVerifiedFitScore ?? 0),
+  );
+  const toTailor = sorted.slice(0, cap);
+
+  const refreshToken =
+    userRow.user_sheet_id && userRow.google_refresh_token_enc
+      ? decrypt(userRow.google_refresh_token_enc)
+      : null;
+
+  const results = await Promise.allSettled(
+    toTailor.map(async (job) => {
+      const match = await tailorMatch({
+        profile,
+        job,
+        refreshToken,
+      });
+      // Update the persisted job_matches row with tailored content.
+      // Use the same apply_url the persist step wrote so we hit the
+      // right upsert.
+      const tailoredText = [
+        match.tailored.summary,
+        match.tailored.highlightedSkills?.length
+          ? 'Skills: ' + match.tailored.highlightedSkills.join(', ')
+          : null,
+        ...(match.tailored.experienceBullets ?? []).flatMap((exp) => [
+          `\n${exp.title} — ${exp.company}`,
+          ...(exp.bullets ?? []).map((b) => `• ${b}`),
+        ]),
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      const coverText = match.coverLetter
+        ? [
+            match.coverLetter.greeting,
+            ...(match.coverLetter.paragraphs ?? []),
+            match.coverLetter.closing,
+            '— Your name',
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+        : null;
+
+      await admin
+        .from('job_matches')
+        .update({
+          tailored_resume_text: tailoredText,
+          tailored_resume_pdf_url: match.tailoredResumeUrl ?? null,
+          tailored_resume_doc_url: match.tailoredResumeDocUrl ?? null,
+          cover_letter_text: coverText,
+          cover_letter_pdf_url: match.coverLetterUrl ?? null,
+          cover_letter_doc_url: match.coverLetterDocUrl ?? null,
+          why_this_role:
+            match.coverLetter?.paragraphs?.[0] ??
+            job.matchReasons?.[0] ??
+            null,
+          summary: match.tailored.summary ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userRow.id)
+        .eq('apply_url', job.url);
+      return true;
+    }),
+  );
+  const succeeded = results.filter(
+    (r) => r.status === 'fulfilled' && r.value === true,
+  ).length;
+  const failed = results.length - succeeded;
+  if (failed > 0) {
+    console.warn(
+      `[run-now] openai auto-tailor: ${succeeded} succeeded, ${failed} failed of ${toTailor.length}`,
+    );
+  }
+  return succeeded;
 }

@@ -12,6 +12,7 @@ interface ProviderResult {
 
 interface OpenAIRunStatus {
   jobsFound: number;
+  jobsTailored?: number;
   cached: boolean;
   skipped: 'disabled' | 'no-key' | 'over-cap' | 'cached' | null;
   error: string | null;
@@ -164,8 +165,14 @@ function OpenAIStatusRow({ status }: { status: OpenAIRunStatus | null }) {
     title = 'OpenAI returned 0 jobs meeting the minimum_fit_score threshold. Try broader criteria or check /api/admin/openai-diagnostic.';
   } else {
     tone = 'success';
-    text = `${status.jobsFound} jobs`;
-    title = `Discovered from ${status.sourcesConsulted} sources on the live web`;
+    const tailoredSuffix =
+      status.jobsTailored && status.jobsTailored > 0
+        ? ` · ${status.jobsTailored} tailored`
+        : '';
+    text = `${status.jobsFound} jobs${tailoredSuffix}`;
+    title = `Discovered from ${status.sourcesConsulted} sources on the live web. ${
+      status.jobsTailored ?? 0
+    } auto-tailored with resume + cover letter + InMail.`;
   }
 
   const toneClass =
