@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo';
 import { SubmitButton } from '@/components/SubmitButton';
 import {
   listAllMentors,
+  listPendingMentors,
   mentorClickCounts,
   ALL_EXPERTISE_TAGS,
   type Mentor,
@@ -28,14 +29,16 @@ export default async function AdminMentorsPage({
   const adminEmail = serverConfig().ADMIN_EMAIL.toLowerCase();
   if ((user.email ?? '').toLowerCase() !== adminEmail) redirect('/dashboard');
 
-  const [mentors, clicks] = await Promise.all([
+  const [mentors, pending, clicks] = await Promise.all([
     listAllMentors(),
+    listPendingMentors(),
     mentorClickCounts(30),
   ]);
   const totalClicks30d = Object.values(clicks).reduce((s, n) => s + n, 0);
   const editing = searchParams.edit
     ? mentors.find((m) => m.id === searchParams.edit) ?? null
     : null;
+  const shareUrl = 'https://www.get-relaunch.com/join-as-mentor';
 
   return (
     <main className="min-h-screen bg-surface-page">
@@ -72,6 +75,84 @@ export default async function AdminMentorsPage({
           <p className="mt-4 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
             {decodeURIComponent(searchParams.error)}
           </p>
+        )}
+
+        {/* ---- Public signup link ---- */}
+        <div className="mt-6 rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-brand-700">
+                🔗 Shareable mentor signup form
+              </h2>
+              <p className="mt-1 text-xs text-ink-soft">
+                Send this link to prospective mentors — they fill it out
+                themselves, you approve here before it goes live.
+              </p>
+            </div>
+            <Link
+              href="/join-as-mentor"
+              target="_blank"
+              className="text-xs font-semibold text-brand-700 hover:underline"
+            >
+              Preview form ↗
+            </Link>
+          </div>
+          <code className="mt-3 block break-all rounded-md border border-brand-100 bg-white p-2 text-xs">
+            {shareUrl}
+          </code>
+        </div>
+
+        {/* ---- Pending review ---- */}
+        {pending.length > 0 && (
+          <div className="mt-6 rounded-xl border border-warn/30 bg-warn-soft p-4">
+            <h2 className="text-sm font-bold">
+              📬 {pending.length} pending review
+            </h2>
+            <p className="mt-1 text-xs text-ink-soft">
+              Public submissions waiting for your approval. Review each below
+              — click Edit to see the full detail, or activate them directly
+              once you&apos;re happy.
+            </p>
+            <div className="mt-3 space-y-2">
+              {pending.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold">{m.name}</div>
+                    <div className="text-xs text-ink-soft">
+                      {m.headline}
+                      {m.submittedEmail ? ` · ${m.submittedEmail}` : ''}
+                    </div>
+                    {m.expertise.length > 0 && (
+                      <div className="mt-1 text-[11px] text-ink-mute">
+                        {m.expertise.slice(0, 5).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/admin/mentors?edit=${m.id}`}
+                      className="text-xs text-brand-700 hover:underline"
+                    >
+                      Review →
+                    </Link>
+                    <form action={toggleMentorActiveAction}>
+                      <input type="hidden" name="id" value={m.id} />
+                      <input type="hidden" name="isActive" value="true" />
+                      <SubmitButton
+                        className="btn-primary text-xs"
+                        pendingLabel="Activating…"
+                      >
+                        Approve
+                      </SubmitButton>
+                    </form>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* ---- Add / edit form ---- */}

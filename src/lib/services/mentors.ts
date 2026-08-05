@@ -22,6 +22,9 @@ export interface Mentor {
   sessionPriceNote: string | null;
   createdAt: string;
   updatedAt: string;
+  submissionSource: 'admin' | 'public_form';
+  submittedEmail: string | null;
+  submissionNote: string | null;
 }
 
 interface RawMentor {
@@ -39,6 +42,9 @@ interface RawMentor {
   session_price_note: string | null;
   created_at: string;
   updated_at: string;
+  submission_source: 'admin' | 'public_form' | null;
+  submitted_email: string | null;
+  submission_note: string | null;
 }
 
 function toMentor(r: RawMentor): Mentor {
@@ -57,6 +63,9 @@ function toMentor(r: RawMentor): Mentor {
     sessionPriceNote: r.session_price_note,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    submissionSource: (r.submission_source ?? 'admin') as Mentor['submissionSource'],
+    submittedEmail: r.submitted_email,
+    submissionNote: r.submission_note,
   };
 }
 
@@ -151,6 +160,66 @@ export async function upsertMentor(input: MentorInput): Promise<string> {
     .single();
   if (error) throw new Error(`Insert mentor failed: ${error.message}`);
   return data.id as string;
+}
+
+/**
+ * Public /join-as-mentor submission. Creates a new mentor row with:
+ *   - submission_source = 'public_form'
+ *   - is_active = false (needs admin approval before appearing on
+ *     /mentors)
+ *   - submitted_email + submission_note preserved for admin outreach
+ * Bio + avatar + linkedin are optional; the required minimum matches
+ * what a user needs to make a booking decision (name + headline +
+ * calendar).
+ */
+export async function submitPublicMentor(input: {
+  name: string;
+  headline: string;
+  bio?: string;
+  calendarUrl: string;
+  linkedinUrl?: string;
+  avatarUrl?: string;
+  expertise: string[];
+  sessionLengthMinutes?: number;
+  sessionPriceNote?: string;
+  submittedEmail: string;
+  submissionNote?: string;
+}): Promise<string> {
+  const admin = supabaseAdmin();
+  const { data, error } = await admin
+    .from('mentors')
+    .insert({
+      name: input.name.trim(),
+      headline: input.headline.trim(),
+      bio: input.bio?.trim() || null,
+      avatar_url: input.avatarUrl?.trim() || null,
+      calendar_url: input.calendarUrl.trim(),
+      linkedin_url: input.linkedinUrl?.trim() || null,
+      expertise: input.expertise,
+      is_active: false, // needs admin approval
+      display_order: 100,
+      session_length_minutes: input.sessionLengthMinutes ?? null,
+      session_price_note: input.sessionPriceNote?.trim() || null,
+      submission_source: 'public_form',
+      submitted_email: input.submittedEmail.trim(),
+      submission_note: input.submissionNote?.trim() || null,
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(`Public mentor submit failed: ${error.message}`);
+  return data.id as string;
+}
+
+/** Admin: pending public submissions awaiting review. */
+export async function listPendingMentors(): Promise<Mentor[]> {
+  const admin = supabaseAdmin();
+  const { data } = await admin
+    .from('mentors')
+    .select('*')
+    .eq('submission_source', 'public_form')
+    .eq('is_active', false)
+    .order('created_at', { ascending: false });
+  return (data ?? []).map((r) => toMentor(r as RawMentor));
 }
 
 export async function setMentorActive(id: string, isActive: boolean): Promise<void> {

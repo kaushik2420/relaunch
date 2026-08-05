@@ -42,13 +42,28 @@ export default async function MentorsPage() {
           <h2 className="text-lg font-semibold">Mentors on the way</h2>
           <p className="mt-2 text-sm text-ink-soft">
             We&apos;re curating a first cohort of mentors now. Check back
-            in a few days — or if you&apos;re a leader who wants to help,
-            reply to any Relaunch email and we&apos;ll get you on the list.
+            in a few days.
           </p>
         </div>
       ) : (
         <MentorsGrid mentors={mentors} />
       )}
+
+      <div className="mt-8 rounded-xl border border-brand-100 bg-brand-50/50 p-4 text-sm">
+        <div className="font-semibold text-brand-700">
+          Know someone who&apos;d be a great mentor?
+        </div>
+        <p className="mt-1 text-ink-soft">
+          Share this link with them:{' '}
+          <a
+            href="/join-as-mentor"
+            className="font-medium text-brand-700 hover:underline"
+          >
+            get-relaunch.com/join-as-mentor
+          </a>
+          . They can sign up themselves — every referral helps this community.
+        </p>
+      </div>
     </div>
   );
 }
